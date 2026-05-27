@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b0f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="仓位计算" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <title>剥头皮仓位计算器</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080a0d;
+        --panel: #11161d;
+        --panel-2: #171d25;
+        --line: #26303b;
+        --text: #f4f7f8;
+        --muted: #9aa6ad;
+        --green: #30d982;
+        --red: #ff5f57;
+        --amber: #ffbf47;
+        --cyan: #54c7ec;
+        --ink: #0a0d10;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, #10151b 0%, var(--bg) 34%, #06080b 100%);
+        color: var(--text);
+        font-family: "SourceHanSerifSC-Regular", "Source Han Serif SC", -apple-system,
+          BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .app {
+        width: min(100%, 520px);
+        min-height: 100svh;
+        margin: 0 auto;
+        padding: calc(18px + env(safe-area-inset-top)) 16px
+          calc(20px + env(safe-area-inset-bottom));
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .mark {
+        width: 44px;
+        height: 44px;
+        border: 1px solid #34404c;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: #121923;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
+        font-size: 22px;
+        flex: 0 0 auto;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(22px, 7vw, 32px);
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .mode {
+        min-width: 82px;
+        height: 38px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        color: var(--amber);
+        background: #121820;
+        display: grid;
+        place-items: center;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .field {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(17, 22, 29, 0.94);
+        padding: 12px;
+      }
+
+      label {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.3;
+      }
+
+      label strong {
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .unit {
+        color: var(--amber);
+        font-weight: 700;
+      }
+
+      input {
+        width: 100%;
+        height: 46px;
+        margin-top: 6px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 28px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      input::placeholder {
+        color: #56616c;
+      }
+
+      input:focus {
+        caret-color: var(--green);
+      }
+
+      .result {
+        border-radius: 8px;
+        background: #f4f7f3;
+        color: var(--ink);
+        padding: 16px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
+      }
+
+      .result-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+
+      .result-title {
+        font-size: 14px;
+        color: #51605a;
+        font-weight: 800;
+      }
+
+      .side {
+        min-width: 64px;
+        border-radius: 999px;
+        padding: 6px 10px;
+        text-align: center;
+        color: #082312;
+        background: rgba(48, 217, 130, 0.18);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .side.short {
+        color: #321010;
+        background: rgba(255, 95, 87, 0.17);
+      }
+
+      .main-number {
+        min-height: 56px;
+        overflow-wrap: anywhere;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: clamp(30px, 12vw, 48px);
+        font-weight: 900;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .metric {
+        min-height: 76px;
+        border: 1px solid #dbe2dd;
+        border-radius: 8px;
+        padding: 10px;
+        background: #ffffff;
+      }
+
+      .metric span {
+        display: block;
+        color: #64706a;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .metric b {
+        display: block;
+        margin-top: 5px;
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 17px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+
+      .warning {
+        margin-top: 10px;
+        min-height: 22px;
+        color: #735000;
+        font-size: 13px;
+        line-height: 1.45;
+        font-weight: 800;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .btn {
+        min-height: 48px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 900;
+      }
+
+      .btn.primary {
+        border-color: rgba(48, 217, 130, 0.45);
+        color: #04130b;
+        background: var(--green);
+      }
+
+      .btn:active {
+        transform: translateY(1px);
+      }
+
+      .btn:disabled {
+        opacity: 0.45;
+      }
+
+      .mini-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+      }
+
+      .quick {
+        position: relative;
+      }
+
+      .quick-input {
+        width: 100%;
+        min-height: 40px;
+        height: 40px;
+        margin: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #10151c;
+        color: var(--text);
+        text-align: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .quick::after {
+        content: "U";
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+        pointer-events: none;
+      }
+
+      .toast {
+        min-height: 26px;
+        text-align: center;
+        color: var(--cyan);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .footer {
+        margin-top: auto;
+        color: #78838a;
+        text-align: center;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 360px) {
+        .app {
+          padding-left: 12px;
+          padding-right: 12px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .mini-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">🪒</div>
+          <div>
+            <h1>剥头皮仓位</h1>
+            <div class="subtitle">入场、止损、风险，直接反推仓位U</div>
+          </div>
+        </div>
+        <div class="mode" id="mode">待计算</div>
+      </header>
+
+      <section class="form" aria-label="仓位计算输入">
+        <div class="field">
+          <label for="entry"><strong>入场点</strong><span class="unit">U</span></label>
+          <input id="entry" inputmode="decimal" autocomplete="off" placeholder="100" />
+        </div>
+        <div class="field">
+          <label for="stop"><strong>止损点</strong><span class="unit">U</span></label>
+          <input id="stop" inputmode="decimal" autocomplete="off" placeholder="98.8" />
+        </div>
+        <div class="field">
+          <label for="risk"><strong>最大风险</strong><span class="unit">U</span></label>
+          <input id="risk" inputmode="decimal" autocomplete="off" placeholder="50" />
+        </div>
+      </section>
+
+      <section class="result" aria-live="polite">
+        <div class="result-head">
+          <div class="result-title">建议名义仓位</div>
+          <div class="side" id="side">--</div>
+        </div>
+        <div class="main-number" id="positionU">-- U</div>
+        <div class="grid">
+          <div class="metric">
+            <span>止损幅度</span>
+            <b id="riskPct">--</b>
+          </div>
+          <div class="metric">
+            <span>数量</span>
+            <b id="quantity">--</b>
+          </div>
+          <div class="metric">
+            <span>每单位亏损</span>
+            <b id="unitRisk">-- U</b>
+          </div>
+          <div class="metric">
+            <span>亏损验证</span>
+            <b id="lossCheck">-- U</b>
+          </div>
+        </div>
+        <div class="warning" id="warning">输入 3 个数后自动计算。</div>
+      </section>
+
+      <section class="actions" aria-label="操作">
+        <button class="btn primary" id="copy" disabled>复制结果</button>
+        <button class="btn" id="clear">清空</button>
+      </section>
+
+      <section class="mini-row" aria-label="快捷风险">
+        <label class="quick"><input class="quick-input" data-quick="0" inputmode="decimal" /></label>
+        <label class="quick"><input class="quick-input" data-quick="1" inputmode="decimal" /></label>
+        <label class="quick"><input class="quick-input" data-quick="2" inputmode="decimal" /></label>
+      </section>
+
+      <div class="toast" id="toast"></div>
+      <footer class="footer">纯计算工具，不连接交易所，不会下单。</footer>
+    </main>
+
+    <script>
+      const ids = ["entry", "stop", "risk"];
+      const els = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+      const out = {
+        mode: document.getElementById("mode"),
+        side: document.getElementById("side"),
+        positionU: document.getElementById("positionU"),
+        riskPct: document.getElementById("riskPct"),
+        quantity: document.getElementById("quantity"),
+        unitRisk: document.getElementById("unitRisk"),
+        lossCheck: document.getElementById("lossCheck"),
+        warning: document.getElementById("warning"),
+        toast: document.getElementById("toast"),
+        copy: document.getElementById("copy"),
+      };
+      const storageKey = "scalp-position-calculator-v1";
+      const quickRiskKey = "scalp-position-calculator-quick-risks-v1";
+      const defaultQuickRisks = ["25", "50", "100"];
+      let lastResult = null;
+
+      function parseValue(value) {
+        const normalized = String(value).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : NaN;
+      }
+
+      function smart(value, maxDigits = 2) {
+        if (!Number.isFinite(value)) return "--";
+        const abs = Math.abs(value);
+        const digits = abs >= 1000 ? 2 : abs >= 1 ? maxDigits : abs >= 0.01 ? 4 : 6;
+        return new Intl.NumberFormat("en-US", {
+          maximumFractionDigits: digits,
+          minimumFractionDigits: 0,
+        }).format(value);
+      }
+
+      function setEmpty(message) {
+        lastResult = null;
+        out.mode.textContent = "待计算";
+        out.side.textContent = "--";
+        out.side.className = "side";
+        out.positionU.textContent = "-- U";
+        out.riskPct.textContent = "--";
+        out.quantity.textContent = "--";
+        out.unitRisk.textContent = "-- U";
+        out.lossCheck.textContent = "-- U";
+        out.warning.textContent = message;
+        out.copy.disabled = true;
+      }
+
+      function save() {
+        const data = Object.fromEntries(ids.map((id) => [id, els[id].value]));
+        localStorage.setItem(storageKey, JSON.stringify(data));
+      }
+
+      function calculate() {
+        save();
+        const entry = parseValue(els.entry.value);
+        const stop = parseValue(els.stop.value);
+        const risk = parseValue(els.risk.value);
+
+        if (entry === null && stop === null && risk === null) {
+          setEmpty("输入 3 个数后自动计算。");
+          return;
+        }
+
+        if ([entry, stop, risk].some((value) => value === null)) {
+          setEmpty("还差数字，补齐后自动出仓位。");
+          return;
+        }
+
+        if ([entry, stop, risk].some((value) => Number.isNaN(value))) {
+          setEmpty("有一个数字格式不对，只保留数字和小数点。");
+          return;
+        }
+
+        if (entry <= 0 || stop <= 0 || risk <= 0) {
+          setEmpty("入场、止损、风险都必须大于 0。");
+          return;
+        }
+
+        const distance = Math.abs(entry - stop);
+        if (distance === 0) {
+          setEmpty("入场点和止损点不能一样。");
+          return;
+        }
+
+        const side = stop < entry ? "做多" : "做空";
+        const rawQuantity = risk / distance;
+        const riskPct = (distance / entry) * 100;
+        const rawPositionU = rawQuantity * entry;
+        const positionU = Math.floor(rawPositionU);
+        const adjustedQuantity = positionU / entry;
+        const lossCheck = positionU * (riskPct / 100);
+
+        lastResult = {
+          entry,
+          stop,
+          risk,
+          distance,
+          side,
+          quantity: adjustedQuantity,
+          positionU,
+          rawPositionU,
+          riskPct,
+          lossCheck,
+        };
+        out.mode.textContent = side === "做多" ? "LONG" : "SHORT";
+        out.side.textContent = side;
+        out.side.className = `side${side === "做空" ? " short" : ""}`;
+        out.positionU.textContent = `${String(positionU)} U`;
+        out.riskPct.textContent = `${smart(riskPct, 3)}%`;
+        out.quantity.textContent = smart(adjustedQuantity, 4);
+        out.unitRisk.textContent = `${smart(distance, 4)} U`;
+        out.lossCheck.textContent = `${smart(lossCheck)} U`;
+        out.warning.textContent =
+          positionU < 1
+            ? "仓位小于 1U，风险或止损距离太小。"
+            : riskPct > 10
+              ? "止损距离偏大，确认这不是输错价格。"
+              : "计算完成，仓位已向下取整。";
+        out.copy.disabled = false;
+      }
+
+      function fallbackCopy(text) {
+        const box = document.createElement("textarea");
+        box.value = text;
+        box.setAttribute("readonly", "");
+        box.style.position = "fixed";
+        box.style.top = "-1000px";
+        document.body.appendChild(box);
+        box.select();
+        box.setSelectionRange(0, box.value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(box);
+        return ok;
+      }
+
+      async function copyResult() {
+        if (!lastResult) return;
+        const text = String(lastResult.positionU);
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+          } else if (!fallbackCopy(text)) {
+            throw new Error("copy failed");
+          }
+          out.toast.textContent = `已复制 ${text}`;
+        } catch {
+          out.toast.textContent = "复制失败，长按仓位数字手动复制";
+        }
+        window.setTimeout(() => (out.toast.textContent = ""), 1600);
+      }
+
+      function clearAll() {
+        ids.forEach((id) => (els[id].value = ""));
+        localStorage.removeItem(storageKey);
+        setEmpty("输入 3 个数后自动计算。");
+        els.entry.focus();
+      }
+
+      function loadSaved() {
+        try {
+          const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+          ids.forEach((id) => {
+            if (data[id]) els[id].value = data[id];
+          });
+        } catch {
+          localStorage.removeItem(storageKey);
+        }
+      }
+
+      function loadQuickRisks() {
+        let values = defaultQuickRisks;
+        try {
+          const saved = JSON.parse(localStorage.getItem(quickRiskKey) || "null");
+          if (Array.isArray(saved) && saved.length === 3) {
+            values = saved.map((value, index) => String(parseValue(value) || defaultQuickRisks[index]));
+          }
+        } catch {
+          localStorage.removeItem(quickRiskKey);
+        }
+
+        document.querySelectorAll("[data-quick]").forEach((input) => {
+          input.value = values[Number(input.dataset.quick)];
+        });
+      }
+
+      function saveQuickRisks() {
+        const values = [...document.querySelectorAll("[data-quick]")].map((input) => input.value.trim());
+        localStorage.setItem(quickRiskKey, JSON.stringify(values));
+      }
+
+      ids.forEach((id) => els[id].addEventListener("input", calculate));
+      document.getElementById("copy").addEventListener("click", copyResult);
+      document.getElementById("clear").addEventListener("click", clearAll);
+      document.querySelectorAll("[data-quick]").forEach((input) => {
+        input.addEventListener("click", () => {
+          if (parseValue(input.value) > 0) {
+            els.risk.value = input.value.trim();
+            calculate();
+          }
+        });
+        input.addEventListener("focus", () => input.select());
+        input.addEventListener("input", () => {
+          saveQuickRisks();
+          if (parseValue(input.value) > 0) {
+            els.risk.value = input.value.trim();
+            calculate();
+          }
+        });
+        input.addEventListener("change", () => {
+          saveQuickRisks();
+          if (parseValue(input.value) > 0) els.risk.value = input.value.trim();
+          calculate();
+        });
+      });
+
+      loadQuickRisks();
+      loadSaved();
+      calculate();
+
+      if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      }
+    </script>
+  </body>
+</html>
