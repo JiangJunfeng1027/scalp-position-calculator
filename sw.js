@@ -1,4 +1,4 @@
-const CACHE_NAME = "scalp-position-calculator-v3";
+const CACHE_NAME = "scalp-position-calculator-v4";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
