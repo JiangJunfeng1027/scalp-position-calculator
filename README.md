@@ -1,11 +1,9 @@
 <div align="center">
-  <img src="./favicon-v2.svg" width="72" height="72" alt="成交差图标" />
-  <h1>仓位与实时执行成本计算器</h1>
+  <img src="./favicon-v3.svg" width="72" height="72" alt="黑金J图标" />
+  <h1>实时执行成本估算器</h1>
   <p><strong>止损只告诉你价格会亏多少；这个工具告诉你，真正成交后总共会亏多少。</strong></p>
   <p>
-    <a href="https://jiangjunfeng1027.github.io/scalp-position-calculator/">仓位计算器</a>
-    ·
-    <a href="https://jiangjunfeng1027.github.io/scalp-position-calculator/cost.html">实时成本估算器</a>
+    <a href="https://jiangjunfeng1027.github.io/scalp-position-calculator/cost.html">打开实时成本估算器</a>
   </p>
 </div>
 
@@ -90,7 +88,7 @@
 
 ## 手机安装与隐私
 
-网站是纯静态网页，可在 iPhone Safari 或 Android Chrome 中“添加到主屏幕”。新图标里的“≠”代表：**预期价格不等于真实成交价**。
+网站是纯静态网页，可在 iPhone Safari 或 Android Chrome 中“添加到主屏幕”。应用现在统一使用**黑金 J**品牌标识。
 
 所有计算都在浏览器本地完成。网页只访问交易平台的公共行情端点，不保存交易所账号、API 密钥或持仓。
 

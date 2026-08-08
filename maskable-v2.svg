@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
-  <title id="title">Execution Gap</title>
-  <rect width="512" height="512" fill="#080b0f"/>
-  <rect x="133" y="187.5" width="246" height="43" rx="21.5" fill="#37f59a"/>
-  <rect x="133" y="281.5" width="246" height="43" rx="21.5" fill="#37f59a"/>
-  <path d="M294.2 136.9 329.8 155.1 217.8 375.1 182.2 356.9Z" fill="#f4f7f5"/>
-  <circle cx="312" cy="146" r="20" fill="#f4f7f5"/>
-  <circle cx="200" cy="366" r="20" fill="#f4f7f5"/>
-</svg>
