@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./favicon-v4.svg" width="72" height="72" alt="意大利斜体黑金J图标" />
+  <img src="./favicon-v5.svg" width="72" height="72" alt="黑金%R风险标识" />
   <h1>实时执行成本估算器</h1>
   <p><strong>止损只告诉你价格会亏多少；这个工具告诉你，真正成交后总共会亏多少。</strong></p>
   <p>
@@ -88,7 +88,7 @@
 
 ## 手机安装与隐私
 
-网站是纯静态网页，可在 iPhone Safari 或 Android Chrome 中“添加到主屏幕”。应用现在统一使用**黑金 J**品牌标识。
+网站是纯静态网页，可在 iPhone Safari 或 Android Chrome 中“添加到主屏幕”。应用统一使用**黑金 %R**品牌标识：它代表“执行成本占本单风险（Risk）的比例”，正是这个工具最重要的判断尺度。
 
 所有计算都在浏览器本地完成。网页只访问交易平台的公共行情端点，不保存交易所账号、API 密钥或持仓。
 
