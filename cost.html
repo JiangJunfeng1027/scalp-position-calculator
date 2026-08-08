@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b0e" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://fapi.binance.com https://api.hyperliquid.xyz; manifest-src 'self'"
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./cost.css" />
+    <title>实时成本估算器</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <a class="back-link" href="./index.html" aria-label="返回仓位计算器">←</a>
+          <div>
+            <div class="eyebrow">EXECUTION FRICTION</div>
+            <h1>实时成本估算</h1>
+          </div>
+        </div>
+        <div class="live-state" id="liveState" data-state="loading">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="liveLabel">载入市场</span>
+          <time id="liveTime">--:--:--</time>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="controls" aria-label="估算参数">
+          <div class="control-intro">
+            <p>风险不含摩擦。仓位按止损反推，再用公开盘口估算市价或限价进场后的执行成本。</p>
+          </div>
+
+          <div class="control-block">
+            <label for="platform">平台</label>
+            <select id="platform">
+              <option value="binance">币安 U本位</option>
+              <option value="hl-main">Hyperliquid 主市场</option>
+              <option value="hl-xyz">Hyperliquid XYZ</option>
+            </select>
+          </div>
+
+          <div class="control-block symbol-block">
+            <label for="symbol">合约标的</label>
+            <div class="symbol-input-wrap">
+              <input
+                id="symbol"
+                list="symbols"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="例如 BEATUSDT"
+              />
+              <span id="symbolCount">--</span>
+            </div>
+            <datalist id="symbols"></datalist>
+            <div class="field-note" id="productNote">正在读取可交易合约…</div>
+          </div>
+
+          <div class="control-block">
+            <label>进出方式</label>
+            <div class="segmented" role="group" aria-label="进出方式">
+              <button type="button" data-execution="market" class="active">市价进＋市价止</button>
+              <button type="button" data-execution="limit">限价进＋市价止</button>
+            </div>
+            <div class="field-note" id="executionNote">双腿均按吃单费率，并计入当前盘口冲击。</div>
+          </div>
+
+          <div class="limit-controls" id="limitControls" hidden>
+            <div class="input-pair">
+              <div class="control-block">
+                <label>交易方向</label>
+                <div class="segmented compact-segmented" role="group" aria-label="交易方向">
+                  <button type="button" data-side="long" class="active">做多</button>
+                  <button type="button" data-side="short">做空</button>
+                </div>
+              </div>
+              <div class="control-block">
+                <div class="label-row">
+                  <label for="limitPrice">限价价格</label>
+                  <button id="resetLimitPrice" class="text-button" type="button">跟随盘口</button>
+                </div>
+                <div class="number-field"><input id="limitPrice" inputmode="decimal" /><span>USD</span></div>
+              </div>
+            </div>
+
+            <div class="control-block fee-block">
+              <div class="label-row">
+                <label for="makerFee">单边挂单费率</label>
+                <button id="resetMakerFee" class="text-button" type="button">恢复默认</button>
+              </div>
+              <div class="number-field"><input id="makerFee" inputmode="decimal" /><span>%</span></div>
+              <div class="field-note" id="makerFeeNote">挂单费率载入中…</div>
+            </div>
+          </div>
+
+          <div class="input-pair">
+            <div class="control-block">
+              <label for="stopPercent">止损距离</label>
+              <div class="number-field"><input id="stopPercent" inputmode="decimal" value="3" /><span>%</span></div>
+            </div>
+            <div class="control-block">
+              <label for="risk">价格风险</label>
+              <div class="number-field"><input id="risk" inputmode="decimal" value="200" /><span>U</span></div>
+            </div>
+          </div>
+
+          <div class="control-block fee-block">
+            <div class="label-row">
+              <label for="takerFee">单边吃单费率</label>
+              <button id="resetFee" class="text-button" type="button">恢复默认</button>
+            </div>
+            <div class="number-field"><input id="takerFee" inputmode="decimal" /><span>%</span></div>
+            <div class="field-note" id="feeNote">费率载入中…</div>
+            <label class="switch-row" id="bnbRow">
+              <input id="bnbDiscount" type="checkbox" checked />
+              <span>币安使用BNB抵扣</span>
+            </label>
+          </div>
+
+          <div class="control-block" id="methodBlock">
+            <label>成本口径</label>
+            <div class="segmented" role="group" aria-label="成本口径">
+              <button type="button" data-method="conservative" class="active">较差侧×2</button>
+              <button type="button" data-method="directional">当前买＋卖</button>
+            </div>
+            <div class="field-note">默认复制较薄一侧，模拟止损时流动性恶化。</div>
+          </div>
+
+          <div class="input-pair compact-pair">
+            <div class="control-block">
+              <label for="redline">成本红线</label>
+              <div class="number-field"><input id="redline" inputmode="decimal" value="5" /><span>%R</span></div>
+            </div>
+            <div class="control-block">
+              <label for="sampleInterval">刷新间隔</label>
+              <select id="sampleInterval">
+                <option value="2000">2秒</option>
+                <option value="3000" selected>3秒</option>
+                <option value="5000">5秒</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="input-pair compact-pair">
+            <div class="control-block">
+              <label for="sampleWindow">稳健窗口</label>
+              <select id="sampleWindow">
+                <option value="20">20个盘口</option>
+                <option value="60" selected>60个盘口</option>
+                <option value="120">120个盘口</option>
+              </select>
+            </div>
+            <div class="control-block" id="depthModeBlock" hidden>
+              <label for="depthMode">盘口深度</label>
+              <select id="depthMode">
+                <option value="auto" selected>自动扩展</option>
+                <option value="raw">仅原始20档</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="control-actions">
+            <button type="button" class="primary-action" id="refreshNow">立即刷新</button>
+            <button type="button" class="secondary-action" id="toggleLive">暂停自动刷新</button>
+          </div>
+
+          <p class="scope-note">
+            只读公共盘口，不连接账户、不会下单。聚合深度是近似值；未计资金费、触发延迟、未来跳空与清算影响。
+          </p>
+        </aside>
+
+        <section class="results" id="resultsPanel" aria-live="polite" data-stale="false">
+          <div class="result-context">
+            <div>
+              <span id="contextPlatform">--</span>
+              <strong id="contextSymbol">选择标的</strong>
+            </div>
+            <div class="frame-count" id="frameCount">0 / 60 帧</div>
+          </div>
+
+          <section class="hero-result" id="heroResult" data-zone="idle">
+            <div class="hero-label" id="heroLabel">滚动最差成本 / 风险</div>
+            <div class="hero-number"><span id="heroValue">--</span><small>%</small></div>
+            <div class="hero-verdict" id="heroVerdict">等待第一帧盘口</div>
+
+            <div class="risk-track" aria-label="成本风险刻度">
+              <div class="risk-fill" id="riskFill"></div>
+              <span class="risk-marker marker-five">5%</span>
+              <span class="risk-marker marker-ten">10%</span>
+            </div>
+
+            <div class="stat-tabs" role="tablist" aria-label="统计视图">
+              <button type="button" data-view="current" role="tab">
+                <span>当前</span><b id="currentStat">--</b>
+              </button>
+              <button type="button" data-view="median" role="tab">
+                <span>中位</span><b id="medianStat">--</b>
+              </button>
+              <button type="button" data-view="worst" role="tab" class="active">
+                <span>最差</span><b id="worstStat">--</b>
+              </button>
+            </div>
+          </section>
+
+          <section class="primary-metrics" aria-label="核心结果">
+            <div>
+              <span>实际名义仓位</span>
+              <strong id="positionValue">-- U</strong>
+              <small id="quantityValue">数量 --</small>
+            </div>
+            <div>
+              <span>摩擦成本</span>
+              <strong id="costValue">-- U</strong>
+              <small id="costRateValue">总成本率 --</small>
+            </div>
+            <div>
+              <span>止损命中总亏</span>
+              <strong id="totalLossValue">-- U</strong>
+              <small id="actualRiskValue">价格风险 --</small>
+            </div>
+            <div>
+              <span>盘口中间价</span>
+              <strong id="midValue">--</strong>
+              <small id="spreadValue">价差 --</small>
+            </div>
+          </section>
+
+          <div class="limit-assumption" id="limitAssumption" hidden>
+            <strong>条件结论：挂单已按Post-only全额成交</strong>
+            <span>若未成交：仓位0、交易成本0；机会成本和逆向选择不在本模型内。</span>
+          </div>
+
+          <section class="breakdown" aria-label="成本拆解">
+            <div class="section-heading">
+              <div>
+                <span>成本拆解</span>
+                <h2>钱消失在哪里</h2>
+              </div>
+              <button type="button" id="copySummary" class="text-button">复制结果</button>
+            </div>
+            <div class="breakdown-row">
+              <span id="feeBreakdownLabel">双边手续费</span>
+              <div class="micro-track"><i id="feeBar"></i></div>
+              <b id="feeValue">--</b>
+            </div>
+            <div class="breakdown-row">
+              <span id="bookBreakdownLabel">价差与盘口冲击</span>
+              <div class="micro-track"><i id="bookBar"></i></div>
+              <b id="bookValue">--</b>
+            </div>
+            <div class="breakdown-row subtle-row">
+              <span>市买不利滑点</span><em id="buySlipValue">--</em>
+              <span>市卖不利滑点</span><em id="sellSlipValue">--</em>
+            </div>
+          </section>
+
+          <section class="rolling" aria-label="滚动窗口">
+            <div class="section-heading">
+              <div>
+                <span>ROLLING WINDOW</span>
+                <h2 id="windowTitle">最近60个不重复盘口</h2>
+              </div>
+              <div id="windowAge">--</div>
+            </div>
+            <svg id="sparkline" viewBox="0 0 600 120" preserveAspectRatio="none" aria-label="成本占风险变化曲线">
+              <path id="sparkArea" class="spark-area" d=""></path>
+              <path id="sparkPath" class="spark-path" d=""></path>
+              <line id="sparkRedline" class="spark-redline" x1="0" x2="600" y1="60" y2="60"></line>
+            </svg>
+          </section>
+
+          <section class="execution" aria-label="盘口容量">
+            <div class="section-heading">
+              <div>
+                <span>BOOK CAPACITY</span>
+                <h2>这一单扫了多深</h2>
+              </div>
+              <div class="depth-meta">
+                <div class="depth-state" id="depthState">--</div>
+                <small id="depthQuality">等待盘口</small>
+              </div>
+            </div>
+            <dl class="execution-grid">
+              <div><dt>买侧使用档数</dt><dd id="buyLevels">--</dd></div>
+              <div><dt>卖侧使用档数</dt><dd id="sellLevels">--</dd></div>
+              <div><dt>买侧末档距离</dt><dd id="buyLast">--</dd></div>
+              <div><dt>卖侧末档距离</dt><dd id="sellLast">--</dd></div>
+              <div><dt>买侧可见深度</dt><dd id="buyDepth">--</dd></div>
+              <div><dt>卖侧可见深度</dt><dd id="sellDepth">--</dd></div>
+            </dl>
+          </section>
+
+          <div class="message" id="message" data-kind="info">正在载入市场元数据…</div>
+        </section>
+      </div>
+
+      <footer class="footer">
+        <span>币安公开Futures API · Hyperliquid公开Info API</span>
+        <span>默认费率核验日：2026-08-08 · 实际账户费率可手动覆盖</span>
+      </footer>
+    </main>
+
+    <script src="./cost-core.js"></script>
+    <script src="./cost.js"></script>
+  </body>
+</html>

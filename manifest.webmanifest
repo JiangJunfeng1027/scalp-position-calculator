@@ -1,7 +1,7 @@
 {
-  "name": "剥头皮仓位计算器",
-  "short_name": "仓位计算",
-  "description": "输入入场点、止损点和最大风险，反推名义仓位U。",
+  "name": "仓位与实时成本计算器",
+  "short_name": "仓位成本",
+  "description": "反推名义仓位，并用币安与Hyperliquid公开盘口估算实时执行成本。",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -294,6 +294,41 @@
         gap: 8px;
       }
 
+      .cost-nav {
+        min-height: 64px;
+        border: 1px solid rgba(48, 217, 130, 0.38);
+        padding: 12px 14px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+        color: var(--text);
+        background: rgba(48, 217, 130, 0.06);
+        text-decoration: none;
+      }
+
+      .cost-nav strong,
+      .cost-nav small {
+        display: block;
+      }
+
+      .cost-nav strong {
+        color: var(--green);
+        font-size: 14px;
+      }
+
+      .cost-nav small {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .cost-nav > span:last-child {
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 20px;
+      }
+
       .quick {
         position: relative;
       }
@@ -424,6 +459,11 @@
         <button class="btn primary" id="copy" disabled>复制结果</button>
         <button class="btn" id="clear">清空</button>
       </section>
+
+      <a class="cost-nav" href="./cost.html">
+        <span><strong>打开实时成本估算</strong><small>市价/限价、自动深度与60/120帧尾部成本</small></span>
+        <span aria-hidden="true">→</span>
+      </a>
 
       <section class="mini-row" aria-label="快捷风险">
         <label class="quick"><input class="quick-input" data-quick="0" inputmode="decimal" /></label>
