@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./favicon-v3.svg" width="72" height="72" alt="黑金J图标" />
+  <img src="./favicon-v4.svg" width="72" height="72" alt="意大利斜体黑金J图标" />
   <h1>实时执行成本估算器</h1>
   <p><strong>止损只告诉你价格会亏多少；这个工具告诉你，真正成交后总共会亏多少。</strong></p>
   <p>
