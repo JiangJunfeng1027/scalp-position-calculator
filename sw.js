@@ -1,4 +1,4 @@
-const CACHE_NAME = "scalp-position-calculator-v8";
+const CACHE_NAME = "scalp-position-calculator-v9";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,9 +6,17 @@ const ASSETS = [
   "./cost.css",
   "./cost-core.js",
   "./cost.js",
-  "./manifest.webmanifest",
-  "./icon.svg",
-  "./apple-touch-icon.png",
+  "./manifest.webmanifest?v=2",
+  "./favicon-v2.ico",
+  "./favicon-32-v2.png",
+  "./favicon-16-v2.png",
+  "./favicon-v2.svg",
+  "./apple-touch-icon-v2.png",
+  "./safari-pinned-tab-v2.svg",
+  "./icon-192-v2.png",
+  "./icon-512-v2.png",
+  "./maskable-192-v2.png",
+  "./maskable-512-v2.png",
 ];
 
 self.addEventListener("install", (event) => {

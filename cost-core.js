@@ -88,7 +88,44 @@
     return `${(fnv >>> 0).toString(36)}:${(djb >>> 0).toString(36)}:${bids.length}:${asks.length}`;
   }
 
-  function sweep(levels, targetQuantity) {
+  function resolveBybitServerWallTime(rawWallTimeValue, receivedAtValue, futureToleranceMs = 5_000) {
+    const rawWallTime = asPositive(rawWallTimeValue, "Bybit服务器报价时间");
+    const receivedAt = asPositive(receivedAtValue, "Bybit报价接收时间");
+    const tolerance = Number(futureToleranceMs);
+    if (!Number.isFinite(tolerance) || tolerance < 0) throw new Error("未来时间容差不能为负数");
+
+    // tsE3 is an MT5 server wall-clock value encoded as an epoch. Bybit uses
+    // UTC+3 from the second Sunday of March until the first Sunday of November,
+    // and UTC+2 otherwise. Validate each candidate against that rule before
+    // comparing it with the receive timestamp; choosing the newest candidate
+    // alone can make a one-hour-old quote look current.
+    const hour = 60 * 60 * 1_000;
+    const nthSundayAt02Utc = (year, month, ordinal) => {
+      const firstDay = new Date(Date.UTC(year, month, 1)).getUTCDay();
+      const firstSunday = 1 + ((7 - firstDay) % 7);
+      return Date.UTC(year, month, firstSunday + (ordinal - 1) * 7, 2);
+    };
+    const officialOffsetAtUtc = (timestamp) => {
+      const year = new Date(timestamp).getUTCFullYear();
+      const summerStart = nthSundayAt02Utc(year, 2, 2);
+      const summerEnd = nthSundayAt02Utc(year, 10, 1);
+      return timestamp >= summerStart && timestamp < summerEnd ? 3 : 2;
+    };
+    const candidates = [2, 3]
+      .map((offset) => ({ offset, timestamp: rawWallTime - offset * hour }))
+      .filter(({ offset, timestamp }) => (
+        officialOffsetAtUtc(timestamp) === offset && timestamp <= receivedAt + tolerance
+      ));
+    if (candidates.length !== 1) {
+      throw new Error(candidates.length
+        ? "Bybit服务器报价时间处于夏令时重叠区间，已拒绝估算"
+        : "Bybit服务器报价时间异常地晚于接收时间");
+    }
+    return candidates[0].timestamp;
+  }
+
+  function sweep(levels, targetQuantity, contractMultiplierValue = 1) {
+    const contractMultiplier = asPositive(contractMultiplierValue, "合约乘数");
     let remaining = targetQuantity;
     let filledQuantity = 0;
     let value = 0;
@@ -111,11 +148,12 @@
       filledQuantity,
       remainingQuantity: Math.max(0, remaining),
       vwap: filledQuantity > 0 ? value / filledQuantity : null,
-      visibleNotional: value,
+      visibleNotional: value * contractMultiplier,
       levelsUsed,
       lastPrice,
       totalVisibleQuantity: levels.reduce((sum, level) => sum + level.size, 0),
-      totalVisibleNotional: levels.reduce((sum, level) => sum + level.size * level.price, 0),
+      totalVisibleNotional:
+        levels.reduce((sum, level) => sum + level.size * level.price, 0) * contractMultiplier,
     };
   }
 
@@ -124,6 +162,16 @@
     const requestedRisk = asPositive(config.risk, "风险");
     const takerRate = Number(config.takerRate);
     if (!Number.isFinite(takerRate) || takerRate < 0) throw new Error("费率无效");
+    const contractMultiplier = asPositive(config.contractMultiplier ?? 1, "合约乘数");
+    const fixedRoundTripCommissionPerQuantity = Number(
+      config.fixedRoundTripCommissionPerQuantity ?? 0,
+    );
+    if (
+      !Number.isFinite(fixedRoundTripCommissionPerQuantity) ||
+      fixedRoundTripCommissionPerQuantity < 0
+    ) {
+      throw new Error("完整往返固定佣金无效");
+    }
 
     const bids = normalizeLevels(config.bids, "bid");
     const asks = normalizeLevels(config.asks, "ask");
@@ -134,7 +182,7 @@
     const mid = (bestBid + bestAsk) / 2;
     const stopFraction = stopPercent / 100;
     const theoreticalNotional = requestedRisk / stopFraction;
-    const rawQuantity = theoreticalNotional / mid;
+    const rawQuantity = theoreticalNotional / (mid * contractMultiplier);
     const quantityStep = config.quantityStep || 1e-8;
     const quantity = floorToStep(rawQuantity, quantityStep);
     const minQuantity = Number(config.minQuantity || 0);
@@ -143,7 +191,14 @@
     const minNotional = Number(config.minNotional || 0);
 
     if (!(quantity > 0) || quantity < minQuantity) {
-      return { status: "below_min_quantity", mid, theoreticalNotional, rawQuantity, quantity };
+      return {
+        status: "below_min_quantity",
+        mid,
+        theoreticalNotional,
+        rawQuantity,
+        quantity,
+        contractMultiplier,
+      };
     }
     if (quantity > maxQuantity + 1e-12) {
       return {
@@ -153,10 +208,11 @@
         rawQuantity,
         quantity,
         maxQuantity,
+        contractMultiplier,
       };
     }
 
-    const actualNotional = quantity * mid;
+    const actualNotional = quantity * contractMultiplier * mid;
     const actualPriceRisk = actualNotional * stopFraction;
     if (actualNotional > maxNotional + 1e-9) {
       return {
@@ -167,6 +223,7 @@
         quantity,
         actualNotional,
         maxNotional,
+        contractMultiplier,
       };
     }
     if (actualNotional < minNotional) {
@@ -178,11 +235,12 @@
         quantity,
         actualNotional,
         minNotional,
+        contractMultiplier,
       };
     }
 
-    const buy = sweep(asks, quantity);
-    const sell = sweep(bids, quantity);
+    const buy = sweep(asks, quantity, contractMultiplier);
+    const sell = sweep(bids, quantity, contractMultiplier);
     if (!buy.complete || !sell.complete) {
       return {
         status: "insufficient_snapshot_depth",
@@ -194,6 +252,7 @@
         actualPriceRisk,
         buy,
         sell,
+        contractMultiplier,
       };
     }
 
@@ -217,6 +276,7 @@
           actualPriceRisk,
           buy,
           sell,
+          contractMultiplier,
         };
       }
     }
@@ -225,15 +285,20 @@
     const sellSlip = (mid - sell.vwap) / mid;
     if (buySlip < 0 || sellSlip < 0) throw new Error("盘口滑点方向异常");
 
-    const feeCost = quantity * takerRate * (buy.vwap + sell.vwap);
-    const directionalBookCost = quantity * (buy.vwap - sell.vwap);
+    const proportionalFeeCost =
+      quantity * contractMultiplier * takerRate * (buy.vwap + sell.vwap);
+    // This input is already the fee for the complete entry/exit cycle.
+    // Charge it once per rounded contract quantity; never double it by leg.
+    const fixedCommissionCost = quantity * fixedRoundTripCommissionPerQuantity;
+    const feeCost = proportionalFeeCost + fixedCommissionCost;
+    const directionalBookCost = quantity * contractMultiplier * (buy.vwap - sell.vwap);
     const conservativeBookCost =
-      2 * quantity * Math.max(buy.vwap - mid, mid - sell.vwap);
+      2 * quantity * contractMultiplier * Math.max(buy.vwap - mid, mid - sell.vwap);
     const directionalCost = feeCost + directionalBookCost;
     const conservativeCost = feeCost + conservativeBookCost;
-    const spreadCost = quantity * (bestAsk - bestBid);
-    const buyImpactCost = quantity * Math.max(0, buy.vwap - bestAsk);
-    const sellImpactCost = quantity * Math.max(0, bestBid - sell.vwap);
+    const spreadCost = quantity * contractMultiplier * (bestAsk - bestBid);
+    const buyImpactCost = quantity * contractMultiplier * Math.max(0, buy.vwap - bestAsk);
+    const sellImpactCost = quantity * contractMultiplier * Math.max(0, bestBid - sell.vwap);
 
     return {
       status: "ok",
@@ -247,6 +312,7 @@
       rawQuantity,
       quantity,
       quantityStep: Number(quantityStep),
+      contractMultiplier,
       actualNotional,
       actualPriceRisk,
       takerRate,
@@ -256,6 +322,9 @@
       sellSlipBp: sellSlip * BP,
       buyLastBp: ((buy.lastPrice - mid) / mid) * BP,
       sellLastBp: ((mid - sell.lastPrice) / mid) * BP,
+      fixedRoundTripCommissionPerQuantity,
+      fixedCommissionCost,
+      proportionalFeeCost,
       feeCost,
       feeRiskPercent: (feeCost / requestedRisk) * 100,
       spreadCost,
@@ -285,6 +354,16 @@
     const takerRate = Number(config.takerRate);
     if (!Number.isFinite(makerRate)) throw new Error("Maker费率无效");
     if (!Number.isFinite(takerRate) || takerRate < 0) throw new Error("Taker费率无效");
+    const contractMultiplier = asPositive(config.contractMultiplier ?? 1, "合约乘数");
+    const fixedRoundTripCommissionPerQuantity = Number(
+      config.fixedRoundTripCommissionPerQuantity ?? 0,
+    );
+    if (
+      !Number.isFinite(fixedRoundTripCommissionPerQuantity) ||
+      fixedRoundTripCommissionPerQuantity < 0
+    ) {
+      throw new Error("完整往返固定佣金无效");
+    }
 
     const bids = normalizeLevels(config.bids, "bid");
     const asks = normalizeLevels(config.asks, "ask");
@@ -318,6 +397,8 @@
       bookMid,
       makerRate,
       takerRate,
+      contractMultiplier,
+      fixedRoundTripCommissionPerQuantity,
     };
 
     if (config.postOnly !== true) return { ...common, status: "post_only_required" };
@@ -338,7 +419,7 @@
 
     const stopFraction = stopPercent / 100;
     const theoreticalNotional = requestedRisk / stopFraction;
-    const rawQuantity = theoreticalNotional / limitPrice;
+    const rawQuantity = theoreticalNotional / (limitPrice * contractMultiplier);
     const quantityStep = config.quantityStep || 1e-8;
     const quantity = floorToStep(rawQuantity, quantityStep);
     const minQuantity = Number(config.minQuantity || 0);
@@ -360,7 +441,7 @@
       return { ...sized, status: "above_market_max", maxQuantity };
     }
 
-    const actualNotional = quantity * limitPrice;
+    const actualNotional = quantity * contractMultiplier * limitPrice;
     const actualPriceRisk = actualNotional * stopFraction;
     const stopReferencePrice = side === "long"
       ? limitPrice * (1 - stopFraction)
@@ -382,8 +463,8 @@
 
     // The stop model consumes one side only, but keep both sweeps in the
     // result as an informational depth diagnostic for the shared UI.
-    const buy = sweep(asks, quantity);
-    const sell = sweep(bids, quantity);
+    const buy = sweep(asks, quantity, contractMultiplier);
+    const sell = sweep(bids, quantity, contractMultiplier);
     const buySlip = buy.vwap == null ? null : Math.max(0, (buy.vwap - bookMid) / bookMid);
     const sellSlip = sell.vwap == null ? null : Math.max(0, (bookMid - sell.vwap) / bookMid);
     const buyLastBp = buy.lastPrice == null ? null : ((buy.lastPrice - bookMid) / bookMid) * BP;
@@ -456,13 +537,19 @@
       }
     }
 
-    const stopBookSlipCost = quantity * Math.abs(stopL2ProxyPrice - stopReferencePrice);
-    const stopGapCost = quantity * Math.abs(stopProxyPrice - stopL2ProxyPrice);
+    const stopBookSlipCost =
+      quantity * contractMultiplier * Math.abs(stopL2ProxyPrice - stopReferencePrice);
+    const stopGapCost =
+      quantity * contractMultiplier * Math.abs(stopProxyPrice - stopL2ProxyPrice);
     const stopSlipCost = stopBookSlipCost + stopGapCost;
-    const entryFeeOrRebate = quantity * limitPrice * makerRate;
-    const stopTakerFeeCost = quantity * stopProxyPrice * takerRate;
-    const stopNotional = quantity * stopProxyPrice;
-    const feeCost = entryFeeOrRebate + stopTakerFeeCost;
+    const entryFeeOrRebate = quantity * contractMultiplier * limitPrice * makerRate;
+    const stopTakerFeeCost = quantity * contractMultiplier * stopProxyPrice * takerRate;
+    const stopNotional = quantity * contractMultiplier * stopProxyPrice;
+    const proportionalFeeCost = entryFeeOrRebate + stopTakerFeeCost;
+    // As above, this is a complete-cycle commission even though the broker
+    // may debit it at entry, so it is added exactly once after a full fill.
+    const fixedCommissionCost = quantity * fixedRoundTripCommissionPerQuantity;
+    const feeCost = proportionalFeeCost + fixedCommissionCost;
     const conditionalTotalCost = feeCost + stopSlipCost;
     const entryQueueLevels = side === "long" ? entryBids : entryAsks;
     const entryVisibleQueueAheadQuantity = entryQueueLevels.reduce((sum, level) => {
@@ -503,6 +590,8 @@
       entryMakerRebate: Math.max(0, -entryFeeOrRebate),
       stopTakerFeeCost,
       stopNotional,
+      fixedCommissionCost,
+      proportionalFeeCost,
       feeCost,
       feeRiskPercent: (feeCost / requestedRisk) * 100,
       conditionalTotalCost,
@@ -511,7 +600,8 @@
       conditionalTotalLoss: actualPriceRisk + conditionalTotalCost,
       totalLossConditional: actualPriceRisk + conditionalTotalCost,
       entryVisibleQueueAheadQuantity,
-      entryVisibleQueueAheadNotional: entryVisibleQueueAheadQuantity * limitPrice,
+      entryVisibleQueueAheadNotional:
+        entryVisibleQueueAheadQuantity * contractMultiplier * limitPrice,
     };
   }
 
@@ -657,6 +747,7 @@
     isStepAligned,
     normalizeLevels,
     bookSignature,
+    resolveBybitServerWallTime,
     sweep,
     estimate,
     estimateLimitEntryMarketStop,

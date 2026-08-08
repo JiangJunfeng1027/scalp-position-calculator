@@ -4,6 +4,52 @@
   const core = window.CostCore;
   const BINANCE_API = "https://fapi.binance.com";
   const HL_INFO = "https://api.hyperliquid.xyz/info";
+  const BYBIT_WS = "wss://ws2.bybit.com/realtime_w";
+  const BYBIT_BOOK_PREFIX = "mt5.ob_5.";
+  const BYBIT_SOURCE_STALE_MS = 15_000;
+  const BYBIT_SPEC_CHECKED_AT = "2026-08-08";
+  const BYBIT_DEPTH_PROFILE = {
+    id: "bybit-lp-10",
+    label: "10档LP指示性深度",
+    indicative: true,
+    approximate: false,
+  };
+  const BYBIT_CFD_MARKETS = [
+    {
+      id: "XAUUSD+",
+      bookSymbol: "XAUUSD+",
+      display: "XAUUSD+ · 黄金",
+      productName: "黄金CFD",
+      contractMultiplier: 100,
+      quantityStep: "0.01",
+      minQuantity: 0.01,
+      maxQuantity: 100,
+      minNotional: 0,
+      maxNotional: Infinity,
+      priceTick: "0.01",
+      leverage: 500,
+      marginTiers: [[10_000_000, 0.002], [20_000_000, 0.01], [40_000_000, 0.1], [100_000_000, 0.2]],
+      fixedRoundTripCommissionPerQuantity: 6,
+      sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Metals" },
+    },
+    {
+      id: "XAGUSD",
+      bookSymbol: "XAGUSD",
+      display: "XAGUSD · 白银",
+      productName: "白银CFD",
+      contractMultiplier: 5000,
+      quantityStep: "0.01",
+      minQuantity: 0.01,
+      maxQuantity: 20,
+      minNotional: 0,
+      maxNotional: Infinity,
+      priceTick: "0.001",
+      leverage: 100,
+      marginTiers: [[5_000_000, 0.01], [10_000_000, 0.05], [30_000_000, 0.2], [100_000_000, 0.33]],
+      fixedRoundTripCommissionPerQuantity: 6,
+      sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Metals" },
+    },
+  ];
   const DEFAULT_MAX_SAMPLES = 60;
   const HL_PROFILE_REPROBE_MS = 60_000;
   const HL_DEPTH_PROFILES = [
@@ -34,11 +80,16 @@
     stopPercent: byId("stopPercent"),
     risk: byId("risk"),
     takerFee: byId("takerFee"),
+    takerFeeBlock: byId("takerFeeBlock"),
     feeNote: byId("feeNote"),
     resetFee: byId("resetFee"),
     makerFee: byId("makerFee"),
     makerFeeNote: byId("makerFeeNote"),
     resetMakerFee: byId("resetMakerFee"),
+    fixedCommissionBlock: byId("fixedCommissionBlock"),
+    fixedCommission: byId("fixedCommission"),
+    fixedCommissionNote: byId("fixedCommissionNote"),
+    resetFixedCommission: byId("resetFixedCommission"),
     bnbRow: byId("bnbRow"),
     bnbDiscount: byId("bnbDiscount"),
     redline: byId("redline"),
@@ -107,6 +158,7 @@
     autoFee: null,
     feeManual: false,
     makerFeeManual: false,
+    fixedCommissionManual: false,
     execution: "market",
     side: "long",
     limitPriceManual: false,
@@ -133,6 +185,13 @@
     metadataTimer: null,
     hlDepthProfileIndex: 0,
     hlDepthProfileCheckedAt: 0,
+    bybitSocket: null,
+    bybitSocketPromise: null,
+    bybitTopic: null,
+    bybitBooks: new Map(),
+    bybitWaiters: new Map(),
+    bybitPingTimer: null,
+    lastSourceTime: null,
   };
 
   function numberValue(input) {
@@ -163,6 +222,24 @@
 
   function formatBp(value, digits = 2) {
     return Number.isFinite(value) ? `${format(value, digits)} bp` : "--";
+  }
+
+  function progressiveMargin(notional, tiers) {
+    if (!(notional >= 0) || !Array.isArray(tiers) || !tiers.length) return null;
+    let margin = 0;
+    let lower = 0;
+    let remaining = notional;
+    for (const [upperValue, rateValue] of tiers) {
+      const upper = Number(upperValue);
+      const rate = Number(rateValue);
+      if (!(upper > lower) || !(rate >= 0)) return null;
+      const slice = Math.min(remaining, upper - lower);
+      margin += slice * rate;
+      remaining -= slice;
+      lower = upper;
+      if (remaining <= 0) return margin;
+    }
+    return margin + remaining * Number(tiers[tiers.length - 1][1]);
   }
 
   function formatClock(timestamp) {
@@ -208,7 +285,7 @@
   function loadPreferences() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      if (["binance", "hl-main", "hl-xyz"].includes(saved.platform)) {
+      if (["binance", "hl-main", "hl-xyz", "bybit-cfd"].includes(saved.platform)) {
         state.platform = saved.platform;
         el.platform.value = saved.platform;
       }
@@ -304,6 +381,211 @@
       body: JSON.stringify(body),
       signal,
     });
+  }
+
+  function loadBybitMarkets() {
+    return BYBIT_CFD_MARKETS.map((market) => ({ ...market, sourceMeta: { ...market.sourceMeta } }));
+  }
+
+  function abortError(message = "请求已取消") {
+    return new DOMException(message, "AbortError");
+  }
+
+  async function decodeBybitMessage(data) {
+    if (typeof data === "string") return data;
+    const blob = data instanceof Blob ? data : new Blob([data]);
+    if (typeof DecompressionStream === "function") {
+      try {
+        const stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
+        return await new Response(stream).text();
+      } catch {
+        // Text acknowledgements can arrive as binary on some browser stacks.
+      }
+    }
+    const text = await blob.text();
+    if (text.trim().startsWith("{") || text.trim().startsWith("[")) return text;
+    throw new Error("当前浏览器无法解压Bybit实时盘口，请升级Chrome或Safari");
+  }
+
+  function decumulateBybitLevels(levels, side) {
+    if (!Array.isArray(levels) || !levels.length) throw new Error(`Bybit${side}盘为空`);
+    let previous = 0;
+    return levels.map((level) => {
+      const price = Number(level?.[0]);
+      const cumulative = Number(level?.[1]);
+      const size = cumulative - previous;
+      previous = cumulative;
+      if (!(price > 0) || !(cumulative > 0) || !(size > 0)) {
+        throw new Error("Bybit指示性深度包含无效累计数量");
+      }
+      return [String(price), String(size)];
+    });
+  }
+
+  function normalizeBybitBook(payload) {
+    const data = Array.isArray(payload?.data) ? payload.data[0] : payload?.data;
+    const symbol = String(data?.s || payload?.topic?.slice(BYBIT_BOOK_PREFIX.length) || "");
+    if (!symbol || !BYBIT_CFD_MARKETS.some((market) => market.bookSymbol === symbol)) {
+      throw new Error("Bybit盘口标的无法识别");
+    }
+    const asks = decumulateBybitLevels(data?.a, "卖");
+    const bids = decumulateBybitLevels(data?.b, "买");
+    const rawSourceTime = Number(payload?.tsE3);
+    if (!(rawSourceTime > 0)) throw new Error("Bybit盘口缺少流动性提供商报价时间");
+    const receivedAt = Number(payload?.ts) || Date.now();
+    const sourceTime = core.resolveBybitServerWallTime(rawSourceTime, receivedAt);
+    return {
+      id: `bybit:${symbol}:${core.bookSignature(bids, asks)}`,
+      time: sourceTime,
+      sourceTime,
+      bids,
+      asks,
+      symbol,
+      depthProfile: {
+        ...BYBIT_DEPTH_PROFILE,
+        label: `${Math.min(bids.length, asks.length)}档LP指示性深度`,
+      },
+    };
+  }
+
+  function rejectBybitWaiters(error) {
+    state.bybitWaiters.forEach((waiters) => {
+      waiters.forEach((waiter) => waiter.reject(error));
+    });
+    state.bybitWaiters.clear();
+  }
+
+  function closeBybitSocket() {
+    window.clearInterval(state.bybitPingTimer);
+    state.bybitPingTimer = null;
+    const socket = state.bybitSocket;
+    state.bybitSocket = null;
+    state.bybitSocketPromise = null;
+    state.bybitTopic = null;
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, "platform changed");
+    rejectBybitWaiters(abortError());
+  }
+
+  function resolveBybitWaiters(symbol, book) {
+    const waiters = state.bybitWaiters.get(symbol);
+    if (!waiters) return;
+    state.bybitWaiters.delete(symbol);
+    waiters.forEach((waiter) => waiter.resolve(book));
+  }
+
+  function subscribeBybitSymbol(symbol) {
+    const socket = state.bybitSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const topic = `${BYBIT_BOOK_PREFIX}${symbol}`;
+    if (state.bybitTopic === topic) return;
+    if (state.bybitTopic) {
+      socket.send(JSON.stringify({ op: "unsubscribe", args: [state.bybitTopic] }));
+    }
+    state.bybitTopic = topic;
+    socket.send(JSON.stringify({ op: "subscribe", args: [topic] }));
+  }
+
+  function ensureBybitSocket() {
+    if (state.bybitSocket?.readyState === WebSocket.OPEN) return Promise.resolve(state.bybitSocket);
+    if (state.bybitSocketPromise) return state.bybitSocketPromise;
+
+    const socket = new WebSocket(`${BYBIT_WS}?v=1&timestamp=${Date.now()}`);
+    socket.binaryType = "blob";
+    state.bybitSocket = socket;
+    state.bybitSocketPromise = new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        fn(value);
+      };
+      const timeout = window.setTimeout(() => {
+        finish(reject, new Error("Bybit WebSocket连接8秒超时"));
+        socket.close();
+      }, 8000);
+      socket.addEventListener("open", () => {
+        state.bybitPingTimer = window.setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ op: "ping" }));
+        }, 12_000);
+        finish(resolve, socket);
+      }, { once: true });
+      socket.addEventListener("error", () => {
+        finish(reject, new Error("Bybit WebSocket连接失败"));
+      }, { once: true });
+      socket.addEventListener("close", () => {
+        finish(reject, abortError("Bybit WebSocket连接已取消"));
+      }, { once: true });
+    });
+
+    socket.addEventListener("message", (event) => {
+      void decodeBybitMessage(event.data)
+        .then((text) => JSON.parse(text))
+        .then((payload) => {
+          if (!String(payload?.topic || "").startsWith(BYBIT_BOOK_PREFIX) || !payload?.data) return;
+          const book = normalizeBybitBook(payload);
+          const current = state.bybitBooks.get(book.symbol);
+          if (!current || book.sourceTime >= current.sourceTime) state.bybitBooks.set(book.symbol, book);
+          resolveBybitWaiters(book.symbol, book);
+        })
+        .catch(() => {
+          // Ignore non-book acknowledgements; a waiting request has its own timeout.
+        });
+    });
+    socket.addEventListener("close", () => {
+      if (state.bybitSocket !== socket) return;
+      window.clearInterval(state.bybitPingTimer);
+      state.bybitPingTimer = null;
+      state.bybitSocket = null;
+      state.bybitSocketPromise = null;
+      state.bybitTopic = null;
+      rejectBybitWaiters(new Error("Bybit WebSocket已断开"));
+    });
+    return state.bybitSocketPromise;
+  }
+
+  function waitForBybitBook(symbol, signal) {
+    const cached = state.bybitBooks.get(symbol);
+    if (cached) return Promise.resolve(cached);
+    return new Promise((resolve, reject) => {
+      const waiters = state.bybitWaiters.get(symbol) || new Set();
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        waiters.delete(waiter);
+        if (!waiters.size) state.bybitWaiters.delete(symbol);
+        fn(value);
+      };
+      const waiter = {
+        resolve: (book) => finish(resolve, book),
+        reject: (error) => finish(reject, error),
+      };
+      const onAbort = () => waiter.reject(abortError());
+      const timeout = window.setTimeout(() => waiter.reject(new Error("Bybit未返回可用指示性深度；可能处于休市")), 7000);
+      waiters.add(waiter);
+      state.bybitWaiters.set(symbol, waiters);
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  async function fetchBybitBook(signal) {
+    await ensureBybitSocket();
+    if (signal?.aborted) throw abortError();
+    const symbol = state.market.bookSymbol;
+    subscribeBybitSymbol(symbol);
+    const book = await waitForBybitBook(symbol, signal);
+    const age = Date.now() - book.sourceTime;
+    if (age < -5_000) {
+      throw new Error("Bybit流动性提供商报价时间异常地晚于当前时间，已拒绝估算");
+    }
+    if (age > BYBIT_SOURCE_STALE_MS) {
+      throw new Error(`Bybit流动性提供商报价已过期${Math.round(age / 60_000)}分钟；市场可能休市，已拒绝估算`);
+    }
+    return book;
   }
 
   function relevantBinanceFilters(symbol) {
@@ -402,14 +684,17 @@
   function platformLabel() {
     if (state.platform === "binance") return "BINANCE USDⓈ-M";
     if (state.platform === "hl-main") return "HYPERLIQUID MAIN";
+    if (state.platform === "bybit-cfd") return "BYBIT TRADFI CFD";
     return "HYPERLIQUID XYZ";
   }
 
   async function loadMarkets({ preserveManual = false } = {}) {
+    if (state.platform !== "bybit-cfd") closeBybitSocket();
     const preservedFees = preserveManual
       ? {
           taker: state.feeManual ? el.takerFee.value : null,
           maker: state.makerFeeManual ? el.makerFee.value : null,
+          fixedCommission: state.fixedCommissionManual ? el.fixedCommission.value : null,
         }
       : null;
     state.loadToken += 1;
@@ -427,6 +712,7 @@
     state.bookStale = false;
     state.hlDepthProfileIndex = 0;
     state.hlDepthProfileCheckedAt = 0;
+    state.lastSourceTime = null;
     state.samples = [];
     renderEmpty();
 
@@ -435,6 +721,8 @@
       if (state.platform === "binance") {
         const markets = await loadBinanceMarkets(state.abortController.signal);
         loaded = { markets, dexMeta: null };
+      } else if (state.platform === "bybit-cfd") {
+        loaded = { markets: loadBybitMarkets(), dexMeta: null, metadataSource: "bundled-spec" };
       } else {
         loaded = await loadHyperliquidMarkets(
           state.platform === "hl-main" ? "" : "xyz",
@@ -442,9 +730,11 @@
         );
       }
       if (token !== state.loadToken) return;
-      state.metadataSource = "live";
+      state.metadataSource = loaded.metadataSource || "live";
       state.metadataFetchedAt = Date.now();
-      cacheMarkets(state.platform, marketCachePayload(loaded.markets, loaded.dexMeta));
+      if (state.metadataSource === "live") {
+        cacheMarkets(state.platform, marketCachePayload(loaded.markets, loaded.dexMeta));
+      }
     } catch (error) {
       if (error.name === "AbortError" || token !== state.loadToken) return;
       const cached = readMarketCache(state.platform);
@@ -475,6 +765,7 @@
   function defaultSymbol() {
     if (state.platform === "binance") return "BEATUSDT";
     if (state.platform === "hl-main") return "BTC";
+    if (state.platform === "bybit-cfd") return "XAUUSD+";
     return "xyz:MU";
   }
 
@@ -484,6 +775,7 @@
     state.markets.forEach((market) => {
       const option = document.createElement("option");
       option.value = market.id;
+      option.label = market.display || market.id;
       fragment.appendChild(option);
     });
     el.symbols.appendChild(fragment);
@@ -496,6 +788,8 @@
     const candidates = [raw];
     if (state.platform === "binance" && !raw.endsWith("USDT")) candidates.push(`${raw}USDT`);
     if (state.platform === "hl-xyz" && !raw.startsWith("XYZ:")) candidates.push(`XYZ:${raw}`);
+    if (state.platform === "bybit-cfd" && raw === "XAU") candidates.push("XAUUSD+");
+    if (state.platform === "bybit-cfd" && raw === "XAG") candidates.push("XAGUSD");
     return state.markets.find((market) => candidates.includes(market.id.toUpperCase())) || null;
   }
 
@@ -519,11 +813,13 @@
       state.bookStale = false;
       state.hlDepthProfileIndex = 0;
       state.hlDepthProfileCheckedAt = 0;
+      state.lastSourceTime = null;
       state.limitPriceManual = false;
     }
     resetSamples();
     state.feeManual = false;
     state.makerFeeManual = false;
+    state.fixedCommissionManual = false;
     applyAutoFee();
     if (preservedFees?.taker != null) {
       state.feeManual = true;
@@ -532,6 +828,10 @@
     if (preservedFees?.maker != null) {
       state.makerFeeManual = true;
       el.makerFee.value = preservedFees.maker;
+    }
+    if (preservedFees?.fixedCommission != null) {
+      state.fixedCommissionManual = true;
+      el.fixedCommission.value = preservedFees.fixedCommission;
     }
     updateFeeNotes();
     updateModeUi();
@@ -542,13 +842,25 @@
 
   function applyAutoFee() {
     if (!state.market) return;
-    let fee = state.platform === "binance"
-      ? core.inferBinanceFees(state.market.sourceMeta, el.bnbDiscount.checked)
-      : core.inferHyperliquidFees(
-          state.market.sourceMeta,
-          state.dexMeta,
-          state.platform === "hl-main",
-        );
+    let fee;
+    if (state.platform === "binance") {
+      fee = core.inferBinanceFees(state.market.sourceMeta, el.bnbDiscount.checked);
+    } else if (state.platform === "bybit-cfd") {
+      fee = {
+        rate: 0,
+        takerRate: 0,
+        makerRate: null,
+        fixedRoundTripCommissionPerQuantity: state.market.fixedRoundTripCommissionPerQuantity,
+        product: `${state.market.productName} · Tight-Spread`,
+        source: `公开CFD规格 · ${BYBIT_SPEC_CHECKED_AT}`,
+      };
+    } else {
+      fee = core.inferHyperliquidFees(
+        state.market.sourceMeta,
+        state.dexMeta,
+        state.platform === "hl-main",
+      );
+    }
     if (state.metadataSource.startsWith("stale-cache")) {
       fee = {
         ...fee,
@@ -559,6 +871,9 @@
     }
     state.autoFee = fee;
     el.bnbRow.hidden = state.platform !== "binance";
+    const isBybit = state.platform === "bybit-cfd";
+    el.takerFeeBlock.hidden = isBybit;
+    el.fixedCommissionBlock.hidden = !isBybit;
     if (Number.isFinite(fee.takerRate)) {
       el.takerFee.value = format(fee.takerRate * 100, 6).replace(/,/g, "");
       state.feeManual = false;
@@ -570,6 +885,12 @@
       state.makerFeeManual = false;
     } else {
       el.makerFee.value = "";
+    }
+    if (Number.isFinite(fee.fixedRoundTripCommissionPerQuantity)) {
+      el.fixedCommission.value = format(fee.fixedRoundTripCommissionPerQuantity, 4).replace(/,/g, "");
+      state.fixedCommissionManual = false;
+    } else if (!state.fixedCommissionManual) {
+      el.fixedCommission.value = "0";
     }
     updateFeeNotes();
   }
@@ -600,6 +921,18 @@
       "warning-note",
       !makerText || state.makerFeeManual || state.metadataSource !== "live",
     );
+
+    const fixedCommission = numberValue(el.fixedCommission);
+    const fixedSource = state.fixedCommissionManual
+      ? "手动覆盖"
+      : `Bybit Tight-Spread公开规则 · ${BYBIT_SPEC_CHECKED_AT}`;
+    el.fixedCommissionNote.textContent = Number.isFinite(fixedCommission)
+      ? `完整开平交易合计 ${format(fixedCommission, 4)} U/手，仅计一次 · ${fixedSource}`
+      : "固定佣金无效，请输入每手完整开平交易佣金。";
+    el.fixedCommissionNote.classList.toggle(
+      "warning-note",
+      state.fixedCommissionManual || !Number.isFinite(fixedCommission),
+    );
   }
 
   function updateContext() {
@@ -608,11 +941,18 @@
     if (!state.market) return;
     const fee = state.autoFee;
     const growthSuffix = fee?.growth ? " · Growth Mode已开启" : "";
-    const metadataSuffix = state.metadataSource === "live" ? "" : " · 元数据来自缓存";
-    el.productNote.textContent = `${fee?.product || "产品待识别"}${growthSuffix}${metadataSuffix}`;
+    const metadataSuffix = state.metadataSource === "live"
+      ? ""
+      : state.metadataSource === "bundled-spec"
+        ? ` · 规格核验${BYBIT_SPEC_CHECKED_AT}`
+        : " · 元数据来自缓存";
+    const depthSuffix = state.platform === "bybit-cfd"
+      ? " · LP指示性深度 · 需账户已切换紧点差模式"
+      : "";
+    el.productNote.textContent = `${fee?.product || "产品待识别"}${growthSuffix}${depthSuffix}${metadataSuffix}`;
     el.productNote.classList.toggle(
       "warning-note",
-      state.metadataSource !== "live" || !Number.isFinite(fee?.takerRate),
+      !["live", "bundled-spec"].includes(state.metadataSource) || !Number.isFinite(fee?.takerRate),
     );
   }
 
@@ -621,6 +961,7 @@
     const risk = numberValue(el.risk);
     const feePercent = numberValue(el.takerFee);
     const makerPercent = numberValue(el.makerFee);
+    const fixedCommission = numberValue(el.fixedCommission);
     const limitPrice = numberValue(el.limitPrice);
     const redline = numberValue(el.redline);
     if (!(stopPercent > 0)) throw new Error("止损距离必须大于0");
@@ -634,11 +975,15 @@
     }
     if (!(redline > 0)) throw new Error("成本红线必须大于0");
     if (redline > 10) throw new Error("成本红线不得高于10%R");
+    if (state.platform === "bybit-cfd" && !(fixedCommission >= 0)) {
+      throw new Error("每手完整往返固定佣金无效");
+    }
     return {
       stopPercent,
       risk,
       takerRate: feePercent / 100,
       makerRate: state.execution === "limit" ? makerPercent / 100 : 0,
+      fixedRoundTripCommissionPerQuantity: state.platform === "bybit-cfd" ? fixedCommission : 0,
       limitPrice,
       side: state.side,
       execution: state.execution,
@@ -656,6 +1001,7 @@
       bids: book.bids,
       asks: book.asks,
       quantityStep: state.market.quantityStep,
+      contractMultiplier: state.market.contractMultiplier || 1,
       minQuantity: state.market.minQuantity,
       maxQuantity: state.market.maxQuantity,
       maxNotional: state.market.maxNotional,
@@ -687,13 +1033,14 @@
       ? core.estimateLimitEntryMarketStop(config)
       : core.estimate(config);
     if (result?.status === "ok") {
-      result.depthProfileId = book.depthProfile?.id || "binance-raw";
+      result.depthProfileId = book.depthProfile?.id || `${state.platform}-raw`;
       const baseQuality = book.depthProfile?.label || "1000档原始盘口·精确";
       result.depthQuality = state.execution === "limit"
         ? `${baseQuality} · 当前盘口形状代理`
         : baseQuality;
       result.depthApproximate = Boolean(book.depthProfile?.approximate);
       result.depthLowPrecision = Boolean(book.depthProfile?.lowPrecision);
+      result.depthIndicative = Boolean(book.depthProfile?.indicative);
     }
     return result;
   }
@@ -732,6 +1079,7 @@
       ]);
       return normalizeBinanceBook({ ...raw, markPrice: Number(premium.markPrice) });
     }
+    if (state.platform === "bybit-cfd") return fetchBybitBook(signal);
     const body = { type: "l2Book", coin: state.market.bookSymbol };
     if (profile.params) Object.assign(body, profile.params);
     const raw = await hlInfo(body, signal);
@@ -743,7 +1091,7 @@
   }
 
   async function fetchEstimatedBook(signal, manual = false) {
-    if (state.platform === "binance") {
+    if (["binance", "bybit-cfd"].includes(state.platform)) {
       const book = await fetchBook(signal);
       return { book, result: estimateBook(book) };
     }
@@ -871,12 +1219,14 @@
         }
         appendSample(book, result);
         const observedChange = book.id !== state.lastObservedBookId;
-        if (observedChange) {
+        const sourceAdvanced = state.platform === "bybit-cfd" && book.sourceTime > (state.lastSourceTime || 0);
+        if (sourceAdvanced) state.lastSourceTime = book.sourceTime;
+        if (observedChange || sourceAdvanced) {
           state.lastObservedBookId = book.id;
           state.lastChangeAt = Date.now();
         }
         state.errorCount = 0;
-        state.lastSuccessAt = observedChange ? book.time : state.lastSuccessAt;
+        state.lastSuccessAt = observedChange || sourceAdvanced ? book.time : state.lastSuccessAt;
         state.bookStale = bookIsStale();
         el.resultsPanel.dataset.stale = String(state.bookStale);
         const liveKind = state.bookStale ? "paused" : state.liveEnabled ? "live" : "paused";
@@ -919,7 +1269,7 @@
     }
     if (
       state.execution === "limit" &&
-      state.platform !== "binance" &&
+      state.platform.startsWith("hl-") &&
       state.lastBook.depthProfile?.approximate &&
       !state.lastBook.entryBids
     ) {
@@ -1018,7 +1368,14 @@
     const bookCost = result[bookCostField()];
     const totalLoss = result[totalLossField()];
     el.positionValue.textContent = `${format(result.actualNotional, 2)} U`;
-    el.quantityValue.textContent = `数量 ${format(result.quantity, 8)}`;
+    const minimumMargin = state.platform === "bybit-cfd"
+      ? progressiveMargin(result.actualNotional, state.market?.marginTiers)
+      : Number(state.market?.leverage) > 0
+        ? result.actualNotional / Number(state.market.leverage)
+        : null;
+    el.quantityValue.textContent = state.platform === "bybit-cfd"
+      ? `${format(result.quantity, 4)} 手 · 最低保证金≈${format(minimumMargin, 2)}U`
+      : `数量 ${format(result.quantity, 8)}`;
     el.costValue.textContent = `${format(cost, 2)} U`;
     el.costRateValue.textContent = `总成本率 ${formatBp(result[rateField()])}`;
     el.totalLossValue.textContent = `${format(totalLoss, 2)} U`;
@@ -1042,11 +1399,15 @@
     el.sellDepth.textContent = `${format(result.sell.totalVisibleNotional, 0)} U`;
     const lastBp = Math.max(result.buyLastBp, result.sellLastBp);
     el.depthState.textContent = lastBp > 50 ? "扫穿±0.5%" : lastBp > 10 ? "扫穿±0.1%" : "近端承接";
-    el.depthQuality.textContent = result.depthApproximate
-      ? `${result.depthQuality} · 官方20个聚合价格桶，非原始档位`
-      : result.depthQuality;
-    el.depthQuality.classList.toggle("warning-note", result.depthApproximate);
-    el.feeBreakdownLabel.textContent = state.execution === "limit" ? "挂单进场费＋止损费" : "双边手续费";
+    el.depthQuality.textContent = result.depthIndicative
+      ? `${result.depthQuality} · 多家LP参考，非撮合订单簿`
+      : result.depthApproximate
+        ? `${result.depthQuality} · 官方20个聚合价格桶，非原始档位`
+        : result.depthQuality;
+    el.depthQuality.classList.toggle("warning-note", result.depthApproximate || result.depthIndicative);
+    el.feeBreakdownLabel.textContent = state.platform === "bybit-cfd"
+      ? "完整交易固定佣金"
+      : state.execution === "limit" ? "挂单进场费＋止损费" : "双边手续费";
     el.bookBreakdownLabel.textContent = state.execution === "limit" ? "止损市价滑点" : "价差与盘口冲击";
     el.limitAssumption.hidden = state.execution !== "limit";
   }
@@ -1092,7 +1453,13 @@
     }
     if (state.feeManual) warnings.push("当前使用手动费率");
     if (state.execution === "limit" && state.makerFeeManual) warnings.push("当前使用手动挂单费率");
+    if (state.platform === "bybit-cfd" && state.fixedCommissionManual) warnings.push("当前使用手动固定佣金");
     if (result.depthApproximate) warnings.push(`${result.depthQuality}，成本为聚合近似`);
+    if (result.depthIndicative) {
+      warnings.push("Bybit深度是多家流动性提供商的参考值，不是撮合订单簿；实际成交可能不同或部分成交");
+      warnings.push("最低保证金按无既有同品种仓位的分层保证金估算；新闻与收开盘时可能临时降杠杆");
+      warnings.push("行情来自Bybit官网当前WebSocket通道，并非承诺稳定的公开V5接口");
+    }
     if (result.depthLowPrecision) warnings.push("当前为3位聚合低精度兜底，建议拆单复核");
     if (state.execution === "limit") {
       warnings.push("结论仅在Post-only挂单全额成交后成立；未成交则仓位和交易成本均为0");
@@ -1101,7 +1468,7 @@
         warnings.push("限价距离当前中价超过0.5%，止损盘口代理置信度较低");
       }
     }
-    if (state.metadataSource !== "live") warnings.push("产品元数据来自缓存");
+    if (!["live", "bundled-spec"].includes(state.metadataSource)) warnings.push("产品元数据来自缓存");
     if (state.bookStale) warnings.push("盘口长时间未更新，结果只代表最后可见快照");
     if (state.platform === "hl-xyz" || state.market?.contractType === "TRADIFI_PERPETUAL") {
       warnings.push("外盘休市时RWA内部定价与深度可能明显变化");
@@ -1167,7 +1534,7 @@
     const messages = {
       below_min_quantity: "仓位低于该合约最小下单数量。",
       above_market_max: `仓位超过单笔市价数量上限${format(result.maxQuantity, 8)}，已阻断估算，不会静默截断。`,
-      above_market_max_notional: `仓位超过该Hyperliquid合约单笔市价名义上限${format(result.maxNotional, 0)}U。`,
+      above_market_max_notional: `仓位超过该合约单笔市价名义上限${format(result.maxNotional, 0)}U。`,
       below_min_notional: `实际名义低于最小订单${format(result.minNotional, 2)}U。`,
       insufficient_snapshot_depth: "公开快照档位不足以完整承接此仓位，无法精确估算；禁止按末档价格外推。",
       insufficient_stop_depth: "止损方向的公开盘口不足以承接此仓位；自动扩展后仍不够，禁止外推。",
@@ -1205,13 +1572,23 @@
   }
 
   function updateModeUi() {
+    const isBybit = state.platform === "bybit-cfd";
+    const limitButton = document.querySelector('[data-execution="limit"]');
+    if (limitButton) {
+      limitButton.disabled = isBybit;
+      limitButton.title = isBybit ? "Bybit CFD首版只提供全市价成本；限价成交不是Post-only撮合模型" : "";
+    }
+    if (isBybit && state.execution === "limit") state.execution = "market";
     const isLimit = state.execution === "limit";
     el.limitControls.hidden = !isLimit;
     el.methodBlock.hidden = isLimit;
     el.limitAssumption.hidden = true;
-    el.depthModeBlock.hidden = state.platform === "binance";
-    el.depthModeBlock.parentElement?.classList.toggle("single-column", state.platform === "binance");
-    el.executionNote.textContent = isLimit
+    const isHyperliquid = state.platform.startsWith("hl-");
+    el.depthModeBlock.hidden = !isHyperliquid;
+    el.depthModeBlock.parentElement?.classList.toggle("single-column", !isHyperliquid);
+    el.executionNote.textContent = isBybit
+      ? "双腿按Tight-Spread CFD的完整交易固定佣金，并用LP指示性深度估算；休市或过期即阻断。"
+      : isLimit
       ? "条件：Post-only挂单全额成交，进场机械滑点为0；止损成本仅以当前盘口形状做代理。"
       : "双腿均按吃单费率，并计入当前盘口冲击。";
     if (isLimit && state.lastBook) updateAutoLimitPrice(state.lastBook);
@@ -1253,11 +1630,11 @@
       `止损 ${format(result.stopPercent, 4)}%｜风险 ${format(result.requestedRisk, 2)}U`,
       `仓位 ${format(result.actualNotional, 2)}U｜成本 ${format(cost, 2)}U`,
       `${state.view === "worst" ? "滚动最差" : state.view === "median" ? "滚动中位" : "当前"}成本占风险 ${format(value, 2)}%`,
-      `手续费 ${format(result.feeCost, 2)}U｜买滑 ${formatBp(result.buySlipBp)}｜卖滑 ${formatBp(result.sellSlipBp)}`,
+      `${state.platform === "bybit-cfd" ? "完整交易佣金" : "手续费"} ${format(result.feeCost, 2)}U｜买滑 ${formatBp(result.buySlipBp)}｜卖滑 ${formatBp(result.sellSlipBp)}`,
       state.execution === "limit"
         ? `口径：Post-only限价进＋市价止（${state.side === "long" ? "做多" : "做空"}），条件为挂单全额成交；止损滑点为当前盘口形状代理，非未来成交预测`
         : `口径：${state.method === "conservative" ? "较差侧×2" : "当前买＋卖"}`,
-      `深度：${result.depthQuality || "原始盘口"}｜窗口 ${state.samples.length}/${maxSamples()}帧`,
+      `深度：${result.depthQuality || "原始盘口"}${result.depthIndicative ? "（LP指示性，非撮合订单簿）" : ""}｜窗口 ${state.samples.length}/${maxSamples()}帧`,
     ].join("\n");
     try {
       if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
@@ -1325,6 +1702,11 @@
     handleNumericChange();
   });
 
+  el.fixedCommission.addEventListener("input", () => {
+    state.fixedCommissionManual = true;
+    handleNumericChange();
+  });
+
   el.limitPrice.addEventListener("input", () => {
     state.limitPriceManual = true;
     handleNumericChange();
@@ -1338,6 +1720,12 @@
 
   el.resetMakerFee.addEventListener("click", () => {
     state.makerFeeManual = false;
+    applyAutoFee();
+    recomputeFromLastBook();
+  });
+
+  el.resetFixedCommission.addEventListener("click", () => {
+    state.fixedCommissionManual = false;
     applyAutoFee();
     recomputeFromLastBook();
   });
@@ -1358,6 +1746,10 @@
 
   document.querySelectorAll("[data-execution]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (state.platform === "bybit-cfd" && button.dataset.execution === "limit") {
+        setMessage("Bybit CFD不是Post-only撮合盘口；为避免伪造Maker成交，本版仅开放全市价估算。", "warning");
+        return;
+      }
       state.execution = button.dataset.execution;
       state.limitPriceManual = false;
       if (state.lastBook) updateAutoLimitPrice(state.lastBook);
@@ -1424,13 +1816,23 @@
     el.toggleLive.textContent = state.liveEnabled ? "暂停自动刷新" : "继续自动刷新";
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "恢复刷新" : "已暂停");
     if (state.liveEnabled) void refreshBook(true);
-    else window.clearTimeout(state.timer);
+    else {
+      window.clearTimeout(state.timer);
+      if (state.platform === "bybit-cfd") {
+        cancelBookRequest();
+        closeBybitSocket();
+      }
+    }
   });
 
   el.copySummary.addEventListener("click", copySummary);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       window.clearTimeout(state.timer);
+      if (state.platform === "bybit-cfd") {
+        cancelBookRequest();
+        closeBybitSocket();
+      }
       if (state.liveEnabled) setLiveState("paused", "后台暂停");
     } else if (state.liveEnabled) {
       if (!state.metadataFetchedAt || Date.now() - state.metadataFetchedAt > METADATA_SOFT_TTL) {
@@ -1446,6 +1848,7 @@
     window.clearInterval(state.metadataTimer);
     state.abortController?.abort();
     state.bookController?.abort();
+    closeBybitSocket();
   });
 
   loadPreferences();
@@ -1456,6 +1859,7 @@
     if (
       state.liveEnabled &&
       !document.hidden &&
+      state.platform !== "bybit-cfd" &&
       Date.now() - (state.metadataFetchedAt || 0) > METADATA_SOFT_TTL
     ) {
       void loadMarkets({ preserveManual: true });
@@ -1463,6 +1867,6 @@
   }, METADATA_SOFT_TTL);
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).catch(() => {});
   }
 })();

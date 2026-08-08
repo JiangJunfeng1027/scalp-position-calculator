@@ -41,6 +41,31 @@ function limitEstimate(overrides = {}) {
   });
 }
 
+// Bybit tsE3 is a UTC+2/+3 server wall clock, but its DST dates are not an
+// IANA timezone. The receive timestamp must select the non-future candidate.
+const marchReceive = Date.UTC(2026, 2, 15, 12, 0, 0);
+close(core.resolveBybitServerWallTime(marchReceive + 3 * 60 * 60 * 1000, marchReceive), marchReceive);
+const octoberReceive = Date.UTC(2026, 9, 30, 12, 0, 0);
+close(core.resolveBybitServerWallTime(octoberReceive + 3 * 60 * 60 * 1000, octoberReceive), octoberReceive);
+const winterReceive = Date.UTC(2026, 11, 15, 12, 0, 0);
+close(core.resolveBybitServerWallTime(winterReceive + 2 * 60 * 60 * 1000, winterReceive), winterReceive);
+const staleSummerQuote = Date.UTC(2026, 7, 8, 12, 0, 0);
+const staleSummerReceive = staleSummerQuote + 60 * 60 * 1000 + 5_000;
+close(
+  core.resolveBybitServerWallTime(staleSummerQuote + 3 * 60 * 60 * 1000, staleSummerReceive),
+  staleSummerQuote,
+);
+assert.equal(staleSummerReceive - staleSummerQuote, 3_605_000);
+const repeatedHourRaw = Date.UTC(2026, 10, 1, 4, 30, 0);
+assert.throws(
+  () => core.resolveBybitServerWallTime(repeatedHourRaw, Date.UTC(2026, 10, 1, 2, 30, 1)),
+  /重叠区间/,
+);
+assert.throws(
+  () => core.resolveBybitServerWallTime(winterReceive + 4 * 60 * 60 * 1000, winterReceive),
+  /晚于接收时间/,
+);
+
 // 1. Fixed risk and stop map to the expected notional.
 const base = estimate();
 assert.equal(base.status, "ok");
@@ -300,5 +325,118 @@ assert.equal(queued.conditionalOnFullFill, true);
 close(makerRebate.entryMakerRebate, -makerRebate.entryFeeOrRebate);
 close(makerRebate.entryMakerFeeCost, 0);
 close(limitLong.stopNotional, limitLong.quantity * limitLong.stopProxyPrice);
+
+// 20. Bybit XAU lots convert through the 100 oz contract multiplier, while
+// the fixed USD 6/lot commission is charged once for the complete round trip.
+assert.deepEqual(
+  estimate(),
+  estimate({ contractMultiplier: 1, fixedRoundTripCommissionPerQuantity: 0 }),
+);
+const xauMarket = core.estimate({
+  bids: [[4341.3, 100]],
+  asks: [[4341.5, 100]],
+  stopPercent: 0.2,
+  risk: 200,
+  takerRate: 0,
+  fixedRoundTripCommissionPerQuantity: 6,
+  contractMultiplier: 100,
+  quantityStep: "0.01",
+  minQuantity: 0.01,
+  maxQuantity: 100,
+});
+assert.equal(xauMarket.status, "ok");
+close(xauMarket.quantity, 0.23);
+close(xauMarket.contractMultiplier, 100);
+close(xauMarket.actualNotional, 99_852.2, 1e-8);
+close(xauMarket.actualPriceRisk, 199.7044, 1e-8);
+close(xauMarket.proportionalFeeCost, 0);
+close(xauMarket.fixedCommissionCost, 1.38, 1e-12);
+close(xauMarket.feeCost, 1.38, 1e-12);
+close(xauMarket.spreadCost, 4.6, 1e-9);
+close(xauMarket.directionalBookCost, 4.6, 1e-9);
+close(xauMarket.directionalCost, 5.98, 1e-9);
+close(xauMarket.directionalRiskPercent, 2.99, 1e-9);
+close(xauMarket.buy.totalVisibleNotional, 43_415_000, 1e-6);
+close(xauMarket.sell.totalVisibleNotional, 43_413_000, 1e-6);
+
+// 21. XAG uses 5,000 oz/lot; its lot rounding and visible notional must use
+// the same multiplier as position, spread, and risk calculations.
+const xagMarket = core.estimate({
+  bids: [[63.522, 20]],
+  asks: [[63.578, 20]],
+  stopPercent: 1,
+  risk: 200,
+  takerRate: 0,
+  fixedRoundTripCommissionPerQuantity: 6,
+  contractMultiplier: 5000,
+  quantityStep: "0.01",
+  minQuantity: 0.01,
+  maxQuantity: 20,
+});
+assert.equal(xagMarket.status, "ok");
+close(xagMarket.quantity, 0.06);
+close(xagMarket.actualNotional, 19_065, 1e-9);
+close(xagMarket.actualPriceRisk, 190.65, 1e-9);
+close(xagMarket.fixedCommissionCost, 0.36, 1e-12);
+close(xagMarket.proportionalFeeCost, 0);
+close(xagMarket.spreadCost, 16.8, 1e-9);
+close(xagMarket.directionalCost, 17.16, 1e-9);
+close(xagMarket.directionalRiskPercent, 8.58, 1e-9);
+
+// 22. The existing Post-only limit model keeps its semantics, but all
+// notional, stop, queue, and fixed-commission fields understand lot contracts.
+const xauLimit = core.estimateLimitEntryMarketStop({
+  bids: [[4341.3, 100]],
+  asks: [[4341.5, 100]],
+  side: "long",
+  limitPrice: 4341.3,
+  postOnly: true,
+  stopPercent: 0.2,
+  risk: 200,
+  makerRate: 0,
+  takerRate: 0,
+  fixedRoundTripCommissionPerQuantity: 6,
+  contractMultiplier: 100,
+  quantityStep: "0.01",
+  minQuantity: 0.01,
+  maxQuantity: 100,
+  priceTick: "0.01",
+});
+assert.equal(xauLimit.status, "ok");
+assert.equal(xauLimit.executionMode, "limit_maker_market_stop");
+assert.equal(xauLimit.fillAssumption, "post_only_full_fill");
+close(xauLimit.quantity, 0.23);
+close(xauLimit.actualNotional, 99_849.9, 1e-8);
+close(xauLimit.fixedCommissionCost, 1.38, 1e-12);
+close(xauLimit.proportionalFeeCost, 0);
+close(xauLimit.feeCost, 1.38, 1e-12);
+close(xauLimit.stopNotional, xauLimit.quantity * 100 * xauLimit.stopProxyPrice, 1e-8);
+close(xauLimit.entryVisibleQueueAheadNotional, 100 * 100 * 4341.3, 1e-6);
+close(xauLimit.buy.totalVisibleNotional, 43_415_000, 1e-6);
+
+// 23. Fixed and proportional fees remain separately auditable, and invalid
+// contract/commission inputs fail closed.
+const xauHybridFees = core.estimate({
+  bids: [[4341.3, 100]],
+  asks: [[4341.5, 100]],
+  stopPercent: 0.2,
+  risk: 200,
+  takerRate: 0.0001,
+  fixedRoundTripCommissionPerQuantity: 6,
+  contractMultiplier: 100,
+  quantityStep: "0.01",
+  minQuantity: 0.01,
+  maxQuantity: 100,
+});
+close(
+  xauHybridFees.feeCost,
+  xauHybridFees.fixedCommissionCost + xauHybridFees.proportionalFeeCost,
+  1e-12,
+);
+assert.throws(() => estimate({ contractMultiplier: 0 }), /合约乘数/);
+assert.throws(
+  () => estimate({ fixedRoundTripCommissionPerQuantity: -1 }),
+  /完整往返固定佣金/,
+);
 
 console.log("cost-core: market and limit-entry checks passed");
