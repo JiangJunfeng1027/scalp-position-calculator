@@ -1,4 +1,4 @@
-const CACHE_NAME = "scalp-position-calculator-v14";
+const CACHE_NAME = "scalp-position-calculator-v15";
 const ASSETS = [
   "./",
   "./index.html",

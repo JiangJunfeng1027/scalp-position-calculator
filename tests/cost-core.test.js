@@ -461,46 +461,7 @@ close(eurusdMarket.fixedCommissionCost, 5.16, 1e-12);
 close(eurusdMarket.spreadCost, 1.72, 1e-9);
 close(eurusdMarket.directionalCost, 6.88, 1e-9);
 
-// 25. CME futures retain integer contracts, contract multipliers, tick
-// friction and one complete-round-trip commission per contract.
-const mesScenario = core.estimate({
-  bids: [[7749.75, 1_000_000]],
-  asks: [[7750.25, 1_000_000]],
-  stopPercent: 0.1,
-  risk: 500,
-  takerRate: 0,
-  fixedRoundTripCommissionPerQuantity: 1.9,
-  contractMultiplier: 5,
-  quantityStep: "1",
-  minQuantity: 1,
-});
-assert.equal(mesScenario.status, "ok");
-close(mesScenario.quantity, 12);
-close(mesScenario.actualNotional, 465_000, 1e-8);
-close(mesScenario.actualPriceRisk, 465, 1e-8);
-close(mesScenario.fixedCommissionCost, 22.8, 1e-12);
-close(mesScenario.directionalBookCost, 30, 1e-9);
-close(mesScenario.directionalCost, 52.8, 1e-9);
-
-// 26. IBKR's current micro-futures schedule is $0.25 execution + $0.35
-// exchange + $0.01 regulatory per side, or $1.22 per complete round trip.
-const ibkrMesScenario = core.estimate({
-  bids: [[7749.75, 1_000_000]],
-  asks: [[7750.25, 1_000_000]],
-  stopPercent: 0.1,
-  risk: 500,
-  takerRate: 0,
-  fixedRoundTripCommissionPerQuantity: 1.22,
-  contractMultiplier: 5,
-  quantityStep: "1",
-  minQuantity: 1,
-});
-assert.equal(ibkrMesScenario.status, "ok");
-close(ibkrMesScenario.quantity, 12);
-close(ibkrMesScenario.fixedCommissionCost, 14.64, 1e-12);
-close(ibkrMesScenario.directionalCost, 44.64, 1e-9);
-
-// 27. LP indicative CFD feeds may publish a locked zero-spread BBO. It is
+// 25. LP indicative CFD feeds may publish a locked zero-spread BBO. It is
 // valid only when the adapter opts in; a genuinely crossed book still fails.
 const lockedIndicative = core.estimate({
   bids: [[1.35, 100]],

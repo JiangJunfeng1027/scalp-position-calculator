@@ -41,7 +41,7 @@
       <div class="workspace">
         <aside class="controls" aria-label="估算参数">
           <div class="control-intro">
-            <p>风险不含摩擦。仓位按止损反推，再用公开盘口或手动tick情景估算进出成本。</p>
+            <p>风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。</p>
           </div>
 
           <div class="control-block">
@@ -51,8 +51,6 @@
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
               <option value="bybit-cfd">Bybit CFD（紧点差账户）</option>
-              <option value="ninjatrader">NinjaTrader 期货（手动盘口）</option>
-              <option value="ibkr">IBKR 期货（手动盘口）</option>
             </select>
           </div>
 
@@ -71,24 +69,6 @@
             <datalist id="symbols"></datalist>
             <div class="symbol-quick-pick" id="symbolQuickPick" hidden></div>
             <div class="field-note" id="productNote">正在读取可交易合约…</div>
-          </div>
-
-          <div class="manual-futures" id="manualFuturesBlock" hidden>
-            <div class="control-block">
-              <label for="manualPrice">当前期货价格</label>
-              <div class="number-field"><input id="manualPrice" inputmode="decimal" placeholder="请填当前报价" /><span>点</span></div>
-              <div class="field-note warning-note">两家都没有匿名公开盘口；请用交易终端当前价格。</div>
-            </div>
-            <div class="input-pair">
-              <div class="control-block">
-                <label for="manualSpreadTicks">买卖价差</label>
-                <div class="number-field"><input id="manualSpreadTicks" inputmode="decimal" value="1" /><span>tick</span></div>
-              </div>
-              <div class="control-block">
-                <label for="manualSlippageTicks">每腿额外滑点</label>
-                <div class="number-field"><input id="manualSlippageTicks" inputmode="decimal" value="0.5" /><span>tick</span></div>
-              </div>
-            </div>
           </div>
 
           <div class="control-block">
@@ -209,7 +189,7 @@
           </div>
 
           <p class="scope-note">
-            只读公共行情，不连接账户、不会下单。Hyperliquid聚合深度是近似值；Bybit为LP指示性深度；NinjaTrader与IBKR为手动期货情景。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
+            只读公共行情，不连接账户、不会下单。Hyperliquid聚合深度是近似值；Bybit为LP指示性深度。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
           </p>
         </aside>
 
@@ -339,7 +319,7 @@
       </div>
 
       <footer class="footer">
-        <span>币安公开Futures API · Hyperliquid公开Info API · Bybit官网TradFi WebSocket · CME期货手动情景</span>
+        <span>币安公开Futures API · Hyperliquid公开Info API · Bybit官网TradFi WebSocket</span>
         <span>默认费率核验日：2026-08-10 · 实际账户费率可手动覆盖</span>
       </footer>
     </main>
