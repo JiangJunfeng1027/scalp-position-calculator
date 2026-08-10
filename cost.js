@@ -7,7 +7,8 @@
   const BYBIT_WS = "wss://ws2.bybit.com/realtime_w";
   const BYBIT_BOOK_PREFIX = "mt5.ob_5.";
   const BYBIT_SOURCE_STALE_MS = 15_000;
-  const BYBIT_SPEC_CHECKED_AT = "2026-08-08";
+  const BYBIT_SPEC_CHECKED_AT = "2026-08-10";
+  const FUTURES_SPEC_CHECKED_AT = "2026-08-10";
   const BYBIT_DEPTH_PROFILE = {
     id: "bybit-lp-10",
     label: "10档LP指示性深度",
@@ -49,6 +50,46 @@
       fixedRoundTripCommissionPerQuantity: 6,
       sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Metals" },
     },
+    {
+      id: "EURUSD+",
+      bookSymbol: "EURUSD+",
+      display: "EURUSD+ · 欧元/美元",
+      productName: "欧元美元CFD",
+      contractMultiplier: 100000,
+      quantityStep: "0.01",
+      minQuantity: 0.01,
+      maxQuantity: 100,
+      minNotional: 0,
+      maxNotional: Infinity,
+      priceTick: "0.00001",
+      leverage: 500,
+      marginTiers: [[10_000_000, 0.002], [25_000_000, 0.003], [50_000_000, 0.01], [100_000_000, 0.02], [Infinity, 0.05]],
+      fixedRoundTripCommissionPerQuantity: 6,
+      sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Forex" },
+    },
+    {
+      id: "GBPUSD+",
+      bookSymbol: "GBPUSD+",
+      display: "GBPUSD+ · 英镑/美元",
+      productName: "英镑美元CFD",
+      contractMultiplier: 100000,
+      quantityStep: "0.01",
+      minQuantity: 0.01,
+      maxQuantity: 100,
+      minNotional: 0,
+      maxNotional: Infinity,
+      priceTick: "0.00001",
+      leverage: 500,
+      marginTiers: [[10_000_000, 0.002], [25_000_000, 0.003], [50_000_000, 0.01], [100_000_000, 0.02], [Infinity, 0.05]],
+      fixedRoundTripCommissionPerQuantity: 6,
+      sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Forex" },
+    },
+  ];
+  const FUTURES_CONTRACTS = [
+    { id: "ES", display: "ES · 标普500 E-mini", productName: "CME E-mini S&P 500", contractMultiplier: 50, priceTick: "0.25", ninjaCommission: 5.76, ibkrCommission: 4.48, ninjaDayMargin: 500 },
+    { id: "MES", display: "MES · 标普500 Micro", productName: "CME Micro E-mini S&P 500", contractMultiplier: 5, priceTick: "0.25", ninjaCommission: 1.90, ibkrCommission: 1.22, ninjaDayMargin: 50 },
+    { id: "NQ", display: "NQ · 纳指100 E-mini", productName: "CME E-mini Nasdaq-100", contractMultiplier: 20, priceTick: "0.25", ninjaCommission: 5.76, ibkrCommission: 4.48, ninjaDayMargin: 1000 },
+    { id: "MNQ", display: "MNQ · 纳指100 Micro", productName: "CME Micro E-mini Nasdaq-100", contractMultiplier: 2, priceTick: "0.25", ninjaCommission: 1.90, ibkrCommission: 1.22, ninjaDayMargin: 100 },
   ];
   const DEFAULT_MAX_SAMPLES = 60;
   const HL_PROFILE_REPROBE_MS = 60_000;
@@ -61,7 +102,7 @@
   ];
   const STORAGE_KEY = "execution-cost-estimator-v1";
   const CACHE_PREFIX = "execution-cost-markets-v3:";
-  const FEE_CHECKED_AT = "2026-08-08";
+  const FEE_CHECKED_AT = "2026-08-10";
   const METADATA_SOFT_TTL = 5 * 60 * 1000;
   const METADATA_HARD_TTL = 60 * 60 * 1000;
 
@@ -70,6 +111,7 @@
     platform: byId("platform"),
     symbol: byId("symbol"),
     symbols: byId("symbols"),
+    symbolQuickPick: byId("symbolQuickPick"),
     symbolCount: byId("symbolCount"),
     productNote: byId("productNote"),
     executionNote: byId("executionNote"),
@@ -89,7 +131,15 @@
     fixedCommissionBlock: byId("fixedCommissionBlock"),
     fixedCommission: byId("fixedCommission"),
     fixedCommissionNote: byId("fixedCommissionNote"),
+    fixedCommissionLabel: byId("fixedCommissionLabel"),
+    fixedCommissionUnit: byId("fixedCommissionUnit"),
     resetFixedCommission: byId("resetFixedCommission"),
+    manualFuturesBlock: byId("manualFuturesBlock"),
+    manualPrice: byId("manualPrice"),
+    manualSpreadTicks: byId("manualSpreadTicks"),
+    manualSlippageTicks: byId("manualSlippageTicks"),
+    intervalBlock: byId("intervalBlock"),
+    windowBlock: byId("windowBlock"),
     bnbRow: byId("bnbRow"),
     bnbDiscount: byId("bnbDiscount"),
     redline: byId("redline"),
@@ -194,6 +244,14 @@
     lastSourceTime: null,
   };
 
+  function isManualFutures(platform = state.platform) {
+    return platform === "ninjatrader" || platform === "ibkr";
+  }
+
+  function usesFixedCommission(platform = state.platform) {
+    return platform === "bybit-cfd" || isManualFutures(platform);
+  }
+
   function numberValue(input) {
     const raw = String(input.value).replace(/[,%\s]/g, "").trim();
     if (!raw) return null;
@@ -202,6 +260,7 @@
   }
 
   function maxSamples() {
+    if (isManualFutures()) return 1;
     const value = Number(el.sampleWindow?.value);
     return [20, 60, 120].includes(value) ? value : DEFAULT_MAX_SAMPLES;
   }
@@ -278,6 +337,8 @@
       side: state.side,
       method: state.method,
       view: state.view,
+      manualSpreadTicks: el.manualSpreadTicks.value,
+      manualSlippageTicks: el.manualSlippageTicks.value,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }
@@ -285,7 +346,7 @@
   function loadPreferences() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      if (["binance", "hl-main", "hl-xyz", "bybit-cfd"].includes(saved.platform)) {
+      if (["binance", "hl-main", "hl-xyz", "bybit-cfd", "ninjatrader", "ibkr"].includes(saved.platform)) {
         state.platform = saved.platform;
         el.platform.value = saved.platform;
       }
@@ -301,6 +362,8 @@
       if (["long", "short"].includes(saved.side)) state.side = saved.side;
       if (["directional", "conservative"].includes(saved.method)) state.method = saved.method;
       if (["current", "median", "worst"].includes(saved.view)) state.view = saved.view;
+      if (Number(saved.manualSpreadTicks) >= 0) el.manualSpreadTicks.value = saved.manualSpreadTicks;
+      if (Number(saved.manualSlippageTicks) >= 0) el.manualSlippageTicks.value = saved.manualSlippageTicks;
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
@@ -385,6 +448,27 @@
 
   function loadBybitMarkets() {
     return BYBIT_CFD_MARKETS.map((market) => ({ ...market, sourceMeta: { ...market.sourceMeta } }));
+  }
+
+  function loadFuturesMarkets(platform) {
+    const isNinja = platform === "ninjatrader";
+    return FUTURES_CONTRACTS.map((contract) => ({
+      ...contract,
+      bookSymbol: contract.id,
+      quantityStep: "1",
+      minQuantity: 1,
+      maxQuantity: Infinity,
+      minNotional: 0,
+      maxNotional: Infinity,
+      leverage: null,
+      manualFutures: true,
+      fixedRoundTripCommissionPerQuantity: isNinja ? contract.ninjaCommission : contract.ibkrCommission,
+      sourceMeta: {
+        product: isNinja ? "NinjaTrader Free期货" : "IBKR Pro期货",
+        broker: platform,
+        specCheckedAt: FUTURES_SPEC_CHECKED_AT,
+      },
+    }));
   }
 
   function abortError(message = "请求已取消") {
@@ -546,7 +630,7 @@
 
   function waitForBybitBook(symbol, signal) {
     const cached = state.bybitBooks.get(symbol);
-    if (cached) return Promise.resolve(cached);
+    if (cached && Date.now() - cached.sourceTime <= BYBIT_SOURCE_STALE_MS) return Promise.resolve(cached);
     return new Promise((resolve, reject) => {
       const waiters = state.bybitWaiters.get(symbol) || new Set();
       let settled = false;
@@ -685,6 +769,8 @@
     if (state.platform === "binance") return "BINANCE USDⓈ-M";
     if (state.platform === "hl-main") return "HYPERLIQUID MAIN";
     if (state.platform === "bybit-cfd") return "BYBIT TRADFI CFD";
+    if (state.platform === "ninjatrader") return "NINJATRADER FUTURES";
+    if (state.platform === "ibkr") return "IBKR FUTURES";
     return "HYPERLIQUID XYZ";
   }
 
@@ -723,6 +809,8 @@
         loaded = { markets, dexMeta: null };
       } else if (state.platform === "bybit-cfd") {
         loaded = { markets: loadBybitMarkets(), dexMeta: null, metadataSource: "bundled-spec" };
+      } else if (isManualFutures()) {
+        loaded = { markets: loadFuturesMarkets(state.platform), dexMeta: null, metadataSource: "bundled-spec" };
       } else {
         loaded = await loadHyperliquidMarkets(
           state.platform === "hl-main" ? "" : "xyz",
@@ -759,13 +847,15 @@
     const preferred = el.symbol.value.trim() || defaultSymbol();
     const found = findMarket(preferred) || findMarket(defaultSymbol()) || state.markets[0];
     if (found) selectMarket(found, true, { preservedFees });
-    setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
+    if (isManualFutures()) setLiveState("paused", "手动情景");
+    else setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
   }
 
   function defaultSymbol() {
     if (state.platform === "binance") return "BEATUSDT";
     if (state.platform === "hl-main") return "BTC";
     if (state.platform === "bybit-cfd") return "XAUUSD+";
+    if (isManualFutures()) return "MES";
     return "xyz:MU";
   }
 
@@ -780,6 +870,21 @@
     });
     el.symbols.appendChild(fragment);
     el.symbolCount.textContent = `${state.markets.length}个`;
+    el.symbolQuickPick.replaceChildren();
+    const showQuickPick = state.platform === "bybit-cfd" || isManualFutures();
+    el.symbolQuickPick.hidden = !showQuickPick;
+    if (showQuickPick) {
+      state.markets.forEach((market) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = state.platform === "bybit-cfd"
+          ? market.id.replace(/\+$/, "")
+          : market.id;
+        button.dataset.marketId = market.id;
+        button.addEventListener("click", () => selectMarket(market));
+        el.symbolQuickPick.appendChild(button);
+      });
+    }
   }
 
   function findMarket(input) {
@@ -790,6 +895,8 @@
     if (state.platform === "hl-xyz" && !raw.startsWith("XYZ:")) candidates.push(`XYZ:${raw}`);
     if (state.platform === "bybit-cfd" && raw === "XAU") candidates.push("XAUUSD+");
     if (state.platform === "bybit-cfd" && raw === "XAG") candidates.push("XAGUSD");
+    if (state.platform === "bybit-cfd" && raw === "EURUSD") candidates.push("EURUSD+");
+    if (state.platform === "bybit-cfd" && raw === "GBPUSD") candidates.push("GBPUSD+");
     return state.markets.find((market) => candidates.includes(market.id.toUpperCase())) || null;
   }
 
@@ -815,6 +922,7 @@
       state.hlDepthProfileCheckedAt = 0;
       state.lastSourceTime = null;
       state.limitPriceManual = false;
+      if (isManualFutures()) el.manualPrice.value = "";
     }
     resetSamples();
     state.feeManual = false;
@@ -836,8 +944,11 @@
     updateFeeNotes();
     updateModeUi();
     updateContext();
+    el.symbolQuickPick.querySelectorAll("button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.marketId === market.id);
+    });
     savePreferences();
-    if (!initial || state.liveEnabled) void refreshBook(true);
+    if (isManualFutures() || !initial || state.liveEnabled) void refreshBook(true);
   }
 
   function applyAutoFee() {
@@ -853,6 +964,15 @@
         fixedRoundTripCommissionPerQuantity: state.market.fixedRoundTripCommissionPerQuantity,
         product: `${state.market.productName} · Tight-Spread`,
         source: `公开CFD规格 · ${BYBIT_SPEC_CHECKED_AT}`,
+      };
+    } else if (isManualFutures()) {
+      fee = {
+        rate: 0,
+        takerRate: 0,
+        makerRate: null,
+        fixedRoundTripCommissionPerQuantity: state.market.fixedRoundTripCommissionPerQuantity,
+        product: state.market.sourceMeta.product,
+        source: `官方全包费率 · ${FUTURES_SPEC_CHECKED_AT}`,
       };
     } else {
       fee = core.inferHyperliquidFees(
@@ -871,9 +991,11 @@
     }
     state.autoFee = fee;
     el.bnbRow.hidden = state.platform !== "binance";
-    const isBybit = state.platform === "bybit-cfd";
-    el.takerFeeBlock.hidden = isBybit;
-    el.fixedCommissionBlock.hidden = !isBybit;
+    const isFixed = usesFixedCommission();
+    el.takerFeeBlock.hidden = isFixed;
+    el.fixedCommissionBlock.hidden = !isFixed;
+    el.fixedCommissionLabel.textContent = isManualFutures() ? "每张完整交易佣金" : "每手完整交易佣金";
+    el.fixedCommissionUnit.textContent = isManualFutures() ? "U/张" : "U/手";
     if (Number.isFinite(fee.takerRate)) {
       el.takerFee.value = format(fee.takerRate * 100, 6).replace(/,/g, "");
       state.feeManual = false;
@@ -925,10 +1047,13 @@
     const fixedCommission = numberValue(el.fixedCommission);
     const fixedSource = state.fixedCommissionManual
       ? "手动覆盖"
-      : `Bybit Tight-Spread公开规则 · ${BYBIT_SPEC_CHECKED_AT}`;
+      : state.platform === "bybit-cfd"
+        ? `Bybit Tight-Spread公开规则 · ${BYBIT_SPEC_CHECKED_AT}`
+        : `${state.platform === "ninjatrader" ? "NinjaTrader Free" : "IBKR Pro首档"}官方全包费率 · ${FUTURES_SPEC_CHECKED_AT}`;
+    const quantityUnit = isManualFutures() ? "张" : "手";
     el.fixedCommissionNote.textContent = Number.isFinite(fixedCommission)
-      ? `完整开平交易合计 ${format(fixedCommission, 4)} U/手，仅计一次 · ${fixedSource}`
-      : "固定佣金无效，请输入每手完整开平交易佣金。";
+      ? `完整开平交易合计 ${format(fixedCommission, 4)} U/${quantityUnit}，仅计一次 · ${fixedSource}`
+      : `固定佣金无效，请输入每${quantityUnit}完整开平交易佣金。`;
     el.fixedCommissionNote.classList.toggle(
       "warning-note",
       state.fixedCommissionManual || !Number.isFinite(fixedCommission),
@@ -941,13 +1066,16 @@
     if (!state.market) return;
     const fee = state.autoFee;
     const growthSuffix = fee?.growth ? " · Growth Mode已开启" : "";
+    const checkedAt = isManualFutures() ? FUTURES_SPEC_CHECKED_AT : BYBIT_SPEC_CHECKED_AT;
     const metadataSuffix = state.metadataSource === "live"
       ? ""
       : state.metadataSource === "bundled-spec"
-        ? ` · 规格核验${BYBIT_SPEC_CHECKED_AT}`
+        ? ` · 规格核验${checkedAt}`
         : " · 元数据来自缓存";
     const depthSuffix = state.platform === "bybit-cfd"
       ? " · LP指示性深度 · 需账户已切换紧点差模式"
+      : isManualFutures()
+        ? " · 手动价格与tick滑点 · 非实时盘口"
       : "";
     el.productNote.textContent = `${fee?.product || "产品待识别"}${growthSuffix}${depthSuffix}${metadataSuffix}`;
     el.productNote.classList.toggle(
@@ -975,15 +1103,15 @@
     }
     if (!(redline > 0)) throw new Error("成本红线必须大于0");
     if (redline > 10) throw new Error("成本红线不得高于10%R");
-    if (state.platform === "bybit-cfd" && !(fixedCommission >= 0)) {
-      throw new Error("每手完整往返固定佣金无效");
+    if (usesFixedCommission() && !(fixedCommission >= 0)) {
+      throw new Error(`每${isManualFutures() ? "张" : "手"}完整往返固定佣金无效`);
     }
     return {
       stopPercent,
       risk,
       takerRate: feePercent / 100,
       makerRate: state.execution === "limit" ? makerPercent / 100 : 0,
-      fixedRoundTripCommissionPerQuantity: state.platform === "bybit-cfd" ? fixedCommission : 0,
+      fixedRoundTripCommissionPerQuantity: usesFixedCommission() ? fixedCommission : 0,
       limitPrice,
       side: state.side,
       execution: state.execution,
@@ -1009,6 +1137,9 @@
       priceTick: state.market.priceTick,
       marketTakeBound: state.market.marketTakeBound,
       markPrice: book.markPrice,
+      // Bybit's LP indicative stream can legitimately publish a locked BBO.
+      // Accept equality only for this adapter; crossed books still fail closed.
+      allowLockedBook: state.platform === "bybit-cfd",
       entryBids: book.entryBids,
       entryAsks: book.entryAsks,
       postOnly: state.execution === "limit",
@@ -1033,6 +1164,14 @@
       ? core.estimateLimitEntryMarketStop(config)
       : core.estimate(config);
     if (result?.status === "ok") {
+      if (book.depthProfile?.manual && result.actualPriceRisk > 0) {
+        result.riskDenominator = result.actualPriceRisk;
+        result.directionalRiskPercent = result.directionalCost / result.actualPriceRisk * 100;
+        result.conservativeRiskPercent = result.conservativeCost / result.actualPriceRisk * 100;
+        result.feeRiskPercent = result.feeCost / result.actualPriceRisk * 100;
+      } else {
+        result.riskDenominator = result.requestedRisk;
+      }
       result.depthProfileId = book.depthProfile?.id || `${state.platform}-raw`;
       const baseQuality = book.depthProfile?.label || "1000档原始盘口·精确";
       result.depthQuality = state.execution === "limit"
@@ -1041,6 +1180,7 @@
       result.depthApproximate = Boolean(book.depthProfile?.approximate);
       result.depthLowPrecision = Boolean(book.depthProfile?.lowPrecision);
       result.depthIndicative = Boolean(book.depthProfile?.indicative);
+      result.depthManual = Boolean(book.depthProfile?.manual);
     }
     return result;
   }
@@ -1070,6 +1210,34 @@
     };
   }
 
+  function buildManualFuturesBook() {
+    const mid = numberValue(el.manualPrice);
+    const spreadTicks = numberValue(el.manualSpreadTicks);
+    const slippageTicks = numberValue(el.manualSlippageTicks);
+    const tick = Number(state.market?.priceTick);
+    if (!(mid > 0)) throw new Error("请填写交易终端里的当前期货价格");
+    if (!(spreadTicks >= 0) || !(slippageTicks >= 0)) throw new Error("tick假设不得为负数");
+    if (!(tick > 0)) throw new Error("期货最小跳动规格无效");
+    const roundTripTicks = spreadTicks + 2 * slippageTicks;
+    if (!(roundTripTicks > 0)) throw new Error("往返价差与滑点合计必须大于0 tick");
+    const halfCost = roundTripTicks * tick / 2;
+    const bid = mid - halfCost;
+    const ask = mid + halfCost;
+    if (!(bid > 0 && ask > bid)) throw new Error("当前价格或tick假设无效");
+    const visibleQuantity = 1_000_000;
+    return {
+      id: `manual:${state.platform}:${state.market.id}:${mid}:${spreadTicks}:${slippageTicks}`,
+      time: Date.now(),
+      bids: [[String(bid), String(visibleQuantity)]],
+      asks: [[String(ask), String(visibleQuantity)]],
+      depthProfile: {
+        id: `manual-${state.platform}`,
+        label: `手动情景：${format(spreadTicks, 2)}tick价差＋每腿${format(slippageTicks, 2)}tick滑点`,
+        manual: true,
+      },
+    };
+  }
+
   async function fetchBook(signal, profile = HL_DEPTH_PROFILES[0]) {
     if (state.platform === "binance") {
       const symbol = encodeURIComponent(state.market.bookSymbol);
@@ -1080,6 +1248,7 @@
       return normalizeBinanceBook({ ...raw, markPrice: Number(premium.markPrice) });
     }
     if (state.platform === "bybit-cfd") return fetchBybitBook(signal);
+    if (isManualFutures()) return buildManualFuturesBook();
     const body = { type: "l2Book", coin: state.market.bookSymbol };
     if (profile.params) Object.assign(body, profile.params);
     const raw = await hlInfo(body, signal);
@@ -1091,7 +1260,7 @@
   }
 
   async function fetchEstimatedBook(signal, manual = false) {
-    if (["binance", "bybit-cfd"].includes(state.platform)) {
+    if (["binance", "bybit-cfd"].includes(state.platform) || isManualFutures()) {
       const book = await fetchBook(signal);
       return { book, result: estimateBook(book) };
     }
@@ -1151,8 +1320,8 @@
     state.samples = [];
     state.sampleIds.clear();
     state.currentSample = null;
-    el.frameCount.textContent = `0 / ${maxSamples()} 帧`;
-    el.windowTitle.textContent = `最近${maxSamples()}个不重复盘口`;
+    el.frameCount.textContent = isManualFutures() ? "0 / 1 情景" : `0 / ${maxSamples()} 帧`;
+    el.windowTitle.textContent = isManualFutures() ? "当前手动期货情景" : `最近${maxSamples()}个不重复盘口`;
     renderSparkline();
   }
 
@@ -1186,7 +1355,8 @@
   }
 
   async function refreshBook(manual = false) {
-    if (!state.market || (!state.liveEnabled && !manual) || (document.hidden && !manual)) return;
+    const manualMode = isManualFutures();
+    if (!state.market || (!state.liveEnabled && !manual && !manualMode) || (document.hidden && !manual && !manualMode)) return;
     if (state.inFlight) return state.inFlight;
     let inputs;
     try {
@@ -1202,7 +1372,7 @@
     const requestToken = ++state.bookRequestToken;
     const controller = new AbortController();
     state.bookController = controller;
-    setLiveState("loading", state.samples.length ? "刷新盘口" : "读取盘口");
+    setLiveState("loading", manualMode ? "计算情景" : state.samples.length ? "刷新盘口" : "读取盘口");
     const promise = fetchEstimatedBook(controller.signal, manual)
       .then((pair) => {
         if (
@@ -1227,10 +1397,15 @@
         }
         state.errorCount = 0;
         state.lastSuccessAt = observedChange || sourceAdvanced ? book.time : state.lastSuccessAt;
-        state.bookStale = bookIsStale();
+        if (manualMode) {
+          state.lastObservedBookId = book.id;
+          state.lastChangeAt = Date.now();
+          state.lastSuccessAt = Date.now();
+        }
+        state.bookStale = manualMode ? false : bookIsStale();
         el.resultsPanel.dataset.stale = String(state.bookStale);
-        const liveKind = state.bookStale ? "paused" : state.liveEnabled ? "live" : "paused";
-        const liveLabel = state.bookStale ? "盘口未更新" : observedChange ? state.liveEnabled ? "实时" : "已暂停" : "盘口未变化";
+        const liveKind = manualMode || state.bookStale ? "paused" : state.liveEnabled ? "live" : "paused";
+        const liveLabel = manualMode ? "手动情景" : state.bookStale ? "盘口未更新" : observedChange ? state.liveEnabled ? "实时" : "已暂停" : "盘口未变化";
         setLiveState(liveKind, liveLabel, state.lastSuccessAt || book.time);
         render();
       })
@@ -1240,8 +1415,10 @@
         state.bookStale = true;
         el.resultsPanel.dataset.stale = "true";
         el.copySummary.disabled = true;
-        setLiveState("error", "盘口失败");
-        setMessage(`实时盘口读取失败：${error.message}。旧结果已灰化，不会冒充当前值。`, "error");
+        setLiveState("error", manualMode ? "参数不完整" : "盘口失败");
+        setMessage(manualMode
+          ? `手动期货情景无法计算：${error.message}。`
+          : `实时盘口读取失败：${error.message}。旧结果已灰化，不会冒充当前值。`, "error");
       })
       .finally(() => {
         if (state.inFlight === promise) state.inFlight = null;
@@ -1254,7 +1431,7 @@
 
   function scheduleNext() {
     window.clearTimeout(state.timer);
-    if (!state.liveEnabled || document.hidden) return;
+    if (!state.liveEnabled || document.hidden || isManualFutures()) return;
     const base = Number(el.sampleInterval.value) || 3000;
     const delay = state.errorCount ? Math.min(30_000, base * 2 ** Math.min(4, state.errorCount)) : base;
     state.timer = window.setTimeout(() => void refreshBook(false), delay);
@@ -1264,7 +1441,7 @@
     resetSamples();
     if (!state.lastBook || state.lastBookMarketId !== state.market?.id) {
       renderEmpty();
-      if (state.liveEnabled) void refreshBook(true);
+      if (state.liveEnabled || isManualFutures()) void refreshBook(true);
       return;
     }
     if (
@@ -1294,7 +1471,7 @@
       setMessage(error.message, "error");
       renderEmpty();
     }
-    if (state.liveEnabled) void refreshBook(true);
+    if (state.liveEnabled && !isManualFutures()) void refreshBook(true);
   }
 
   function resultField() {
@@ -1335,7 +1512,9 @@
     el.currentStat.textContent = current ? formatPercent(current.result[field]) : "--";
     el.medianStat.textContent = median ? formatPercent(median.result[field]) : "--";
     el.worstStat.textContent = worst ? formatPercent(worst.result[field]) : "--";
-    el.frameCount.textContent = `${state.samples.length} / ${maxSamples()} 帧`;
+    el.frameCount.textContent = isManualFutures()
+      ? `${state.samples.length} / 1 情景`
+      : `${state.samples.length} / ${maxSamples()} 帧`;
   }
 
   function renderHero(sample) {
@@ -1345,10 +1524,12 @@
     const zone = value > 10 ? "bad" : value <= Math.min(redline, 10) ? "good" : "warn";
     el.heroResult.dataset.zone = zone;
     const labels = { current: "当前成本 / 风险", median: "滚动中位成本 / 风险", worst: "滚动最差成本 / 风险" };
-    const methodLabel = state.execution === "limit"
+    const methodLabel = isManualFutures()
+      ? "手动tick情景"
+      : state.execution === "limit"
       ? `限价成交后 · ${state.side === "long" ? "做多" : "做空"}`
       : state.method === "conservative" ? "较差侧×2" : "当前买＋卖";
-    el.heroLabel.textContent = `${labels[state.view]} · ${methodLabel}`;
+    el.heroLabel.textContent = `${isManualFutures() ? "当前情景成本 / 实际风险" : labels[state.view]} · ${methodLabel}`;
     el.heroValue.textContent = format(value, 2);
     el.riskFill.style.width = `${Math.min(100, Math.max(0, value / 10 * 100))}%`;
     if (zone === "good") {
@@ -1356,7 +1537,9 @@
     } else if (zone === "warn") {
       el.heroVerdict.textContent = `超过 ${format(redline, 2)}%R 理想线 · 仍低于10%上限`;
     } else {
-      el.heroVerdict.textContent = state.execution === "limit"
+      el.heroVerdict.textContent = isManualFutures()
+        ? "超过10%R · 放宽止损或降低tick摩擦假设"
+        : state.execution === "limit"
         ? "超过10%R · 缩仓或放宽止损"
         : "超过10%R · 缩仓、放宽止损或限价入场";
     }
@@ -1370,45 +1553,55 @@
     el.positionValue.textContent = `${format(result.actualNotional, 2)} U`;
     const minimumMargin = state.platform === "bybit-cfd"
       ? progressiveMargin(result.actualNotional, state.market?.marginTiers)
+      : state.platform === "ninjatrader"
+        ? result.quantity * Number(state.market?.ninjaDayMargin || 0)
       : Number(state.market?.leverage) > 0
         ? result.actualNotional / Number(state.market.leverage)
         : null;
     el.quantityValue.textContent = state.platform === "bybit-cfd"
       ? `${format(result.quantity, 4)} 手 · 最低保证金≈${format(minimumMargin, 2)}U`
-      : `数量 ${format(result.quantity, 8)}`;
+      : state.platform === "ninjatrader"
+        ? `${format(result.quantity, 0)} 张 · 日内保证金参考≈${format(minimumMargin, 2)}U`
+        : state.platform === "ibkr"
+          ? `${format(result.quantity, 0)} 张 · 保证金以账户what-if为准`
+          : `数量 ${format(result.quantity, 8)}`;
     el.costValue.textContent = `${format(cost, 2)} U`;
     el.costRateValue.textContent = `总成本率 ${formatBp(result[rateField()])}`;
     el.totalLossValue.textContent = `${format(totalLoss, 2)} U`;
     el.actualRiskValue.textContent = `实际价格风险 ${format(result.actualPriceRisk, 2)} U`;
     el.midValue.textContent = format(result.mid, 8);
-    el.spreadValue.textContent = `完整价差 ${formatBp(result.spreadBp, 3)}`;
+    el.spreadValue.textContent = result.depthManual
+      ? `往返tick摩擦 ${formatBp(result.spreadBp, 3)}`
+      : `完整价差 ${formatBp(result.spreadBp, 3)}`;
 
     const total = Math.max(1e-12, Math.abs(cost));
     el.feeBar.style.width = `${Math.min(100, Math.max(0, result.feeCost / total * 100))}%`;
     el.bookBar.style.width = `${Math.min(100, Math.max(0, bookCost / total * 100))}%`;
     el.feeValue.textContent = `${format(result.feeCost, 2)}U · ${formatPercent(result.feeRiskPercent, 2)}`;
-    el.bookValue.textContent = `${format(bookCost, 2)}U · ${formatPercent(bookCost / result.requestedRisk * 100, 2)}`;
+    el.bookValue.textContent = `${format(bookCost, 2)}U · ${formatPercent(bookCost / (result.riskDenominator || result.requestedRisk) * 100, 2)}`;
     el.buySlipValue.textContent = formatBp(result.buySlipBp, 3);
     el.sellSlipValue.textContent = formatBp(result.sellSlipBp, 3);
 
-    el.buyLevels.textContent = `${result.buy.levelsUsed} 档`;
-    el.sellLevels.textContent = `${result.sell.levelsUsed} 档`;
+    el.buyLevels.textContent = result.depthManual ? "手动假设" : `${result.buy.levelsUsed} 档`;
+    el.sellLevels.textContent = result.depthManual ? "手动假设" : `${result.sell.levelsUsed} 档`;
     el.buyLast.textContent = formatBp(result.buyLastBp, 3);
     el.sellLast.textContent = formatBp(result.sellLastBp, 3);
-    el.buyDepth.textContent = `${format(result.buy.totalVisibleNotional, 0)} U`;
-    el.sellDepth.textContent = `${format(result.sell.totalVisibleNotional, 0)} U`;
+    el.buyDepth.textContent = result.depthManual ? "未接实时深度" : `${format(result.buy.totalVisibleNotional, 0)} U`;
+    el.sellDepth.textContent = result.depthManual ? "未接实时深度" : `${format(result.sell.totalVisibleNotional, 0)} U`;
     const lastBp = Math.max(result.buyLastBp, result.sellLastBp);
-    el.depthState.textContent = lastBp > 50 ? "扫穿±0.5%" : lastBp > 10 ? "扫穿±0.1%" : "近端承接";
+    el.depthState.textContent = result.depthManual ? "手动tick情景" : lastBp > 50 ? "扫穿±0.5%" : lastBp > 10 ? "扫穿±0.1%" : "近端承接";
     el.depthQuality.textContent = result.depthIndicative
       ? `${result.depthQuality} · 多家LP参考，非撮合订单簿`
       : result.depthApproximate
         ? `${result.depthQuality} · 官方20个聚合价格桶，非原始档位`
         : result.depthQuality;
-    el.depthQuality.classList.toggle("warning-note", result.depthApproximate || result.depthIndicative);
-    el.feeBreakdownLabel.textContent = state.platform === "bybit-cfd"
+    el.depthQuality.classList.toggle("warning-note", result.depthApproximate || result.depthIndicative || result.depthManual);
+    el.feeBreakdownLabel.textContent = usesFixedCommission()
       ? "完整交易固定佣金"
       : state.execution === "limit" ? "挂单进场费＋止损费" : "双边手续费";
-    el.bookBreakdownLabel.textContent = state.execution === "limit" ? "止损市价滑点" : "价差与盘口冲击";
+    el.bookBreakdownLabel.textContent = result.depthManual
+      ? "价差＋两腿滑点假设"
+      : state.execution === "limit" ? "止损市价滑点" : "价差与盘口冲击";
     el.limitAssumption.hidden = state.execution !== "limit";
   }
 
@@ -1453,12 +1646,17 @@
     }
     if (state.feeManual) warnings.push("当前使用手动费率");
     if (state.execution === "limit" && state.makerFeeManual) warnings.push("当前使用手动挂单费率");
-    if (state.platform === "bybit-cfd" && state.fixedCommissionManual) warnings.push("当前使用手动固定佣金");
+    if (usesFixedCommission() && state.fixedCommissionManual) warnings.push("当前使用手动固定佣金");
     if (result.depthApproximate) warnings.push(`${result.depthQuality}，成本为聚合近似`);
     if (result.depthIndicative) {
       warnings.push("Bybit深度是多家流动性提供商的参考值，不是撮合订单簿；实际成交可能不同或部分成交");
       warnings.push("最低保证金按无既有同品种仓位的分层保证金估算；新闻与收开盘时可能临时降杠杆");
       warnings.push("行情来自Bybit官网当前WebSocket通道，并非承诺稳定的公开V5接口");
+    }
+    if (result.depthManual) {
+      warnings.push("NinjaTrader与IBKR没有可匿名直连的实时L2；当前只按手填价格和tick情景估算，不代表实时盘口容量");
+      warnings.push(state.platform === "ninjatrader" ? "默认佣金为NinjaTrader Free方案；其他方案请手动覆盖" : "IBKR默认按Pro账户月量不超过1000张的首档全包费率；保证金以账户what-if为准");
+      warnings.push("期货只能整数张，%R以取整后的实际价格风险为分母；请同时检查风险利用率");
     }
     if (result.depthLowPrecision) warnings.push("当前为3位聚合低精度兜底，建议拆单复核");
     if (state.execution === "limit") {
@@ -1573,21 +1771,36 @@
 
   function updateModeUi() {
     const isBybit = state.platform === "bybit-cfd";
+    const isManual = isManualFutures();
+    const limitUnsupported = isBybit || isManual;
     const limitButton = document.querySelector('[data-execution="limit"]');
     if (limitButton) {
-      limitButton.disabled = isBybit;
-      limitButton.title = isBybit ? "Bybit CFD首版只提供全市价成本；限价成交不是Post-only撮合模型" : "";
+      limitButton.disabled = limitUnsupported;
+      limitButton.title = isBybit
+        ? "Bybit CFD首版只提供全市价成本；限价成交不是Post-only撮合模型"
+        : isManual
+          ? "手动期货模型首版只计算全市价情景"
+          : "";
     }
-    if (isBybit && state.execution === "limit") state.execution = "market";
+    if (limitUnsupported && state.execution === "limit") state.execution = "market";
     const isLimit = state.execution === "limit";
     el.limitControls.hidden = !isLimit;
-    el.methodBlock.hidden = isLimit;
+    el.methodBlock.hidden = isLimit || isManual;
+    el.manualFuturesBlock.hidden = !isManual;
+    el.intervalBlock.hidden = isManual;
+    el.windowBlock.hidden = isManual;
+    el.intervalBlock.parentElement?.classList.toggle("single-column", isManual);
+    el.windowBlock.parentElement.hidden = isManual;
+    el.toggleLive.hidden = isManual;
+    el.refreshNow.textContent = isManual ? "重新计算" : "立即刷新";
     el.limitAssumption.hidden = true;
     const isHyperliquid = state.platform.startsWith("hl-");
     el.depthModeBlock.hidden = !isHyperliquid;
     el.depthModeBlock.parentElement?.classList.toggle("single-column", !isHyperliquid);
     el.executionNote.textContent = isBybit
       ? "双腿按Tight-Spread CFD的完整交易固定佣金，并用LP指示性深度估算；休市或过期即阻断。"
+      : isManual
+        ? "无匿名实时盘口：按当前手填价格、买卖价差tick、每腿额外滑点tick与官方全包佣金估算。"
       : isLimit
       ? "条件：Post-only挂单全额成交，进场机械滑点为0；止损成本仅以当前盘口形状做代理。"
       : "双腿均按吃单费率，并计入当前盘口冲击。";
@@ -1629,12 +1842,12 @@
       `${platformLabel()} ${state.market.id}`,
       `止损 ${format(result.stopPercent, 4)}%｜风险 ${format(result.requestedRisk, 2)}U`,
       `仓位 ${format(result.actualNotional, 2)}U｜成本 ${format(cost, 2)}U`,
-      `${state.view === "worst" ? "滚动最差" : state.view === "median" ? "滚动中位" : "当前"}成本占风险 ${format(value, 2)}%`,
-      `${state.platform === "bybit-cfd" ? "完整交易佣金" : "手续费"} ${format(result.feeCost, 2)}U｜买滑 ${formatBp(result.buySlipBp)}｜卖滑 ${formatBp(result.sellSlipBp)}`,
+      `${isManualFutures() ? "当前情景" : state.view === "worst" ? "滚动最差" : state.view === "median" ? "滚动中位" : "当前"}成本占风险 ${format(value, 2)}%`,
+      `${usesFixedCommission() ? "完整交易佣金" : "手续费"} ${format(result.feeCost, 2)}U｜买滑 ${formatBp(result.buySlipBp)}｜卖滑 ${formatBp(result.sellSlipBp)}`,
       state.execution === "limit"
         ? `口径：Post-only限价进＋市价止（${state.side === "long" ? "做多" : "做空"}），条件为挂单全额成交；止损滑点为当前盘口形状代理，非未来成交预测`
         : `口径：${state.method === "conservative" ? "较差侧×2" : "当前买＋卖"}`,
-      `深度：${result.depthQuality || "原始盘口"}${result.depthIndicative ? "（LP指示性，非撮合订单簿）" : ""}｜窗口 ${state.samples.length}/${maxSamples()}帧`,
+      `深度：${result.depthQuality || "原始盘口"}${result.depthIndicative ? "（LP指示性，非撮合订单簿）" : result.depthManual ? "（手动情景，非实时盘口）" : ""}｜${isManualFutures() ? "情景" : "窗口"} ${state.samples.length}/${maxSamples()}${isManualFutures() ? "" : "帧"}`,
     ].join("\n");
     try {
       if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
@@ -1652,6 +1865,15 @@
     updateFeeNotes();
     recomputeFromLastBook();
   }, 260);
+
+  const handleManualFuturesChange = debounce(() => {
+    if (!isManualFutures()) return;
+    savePreferences();
+    resetSamples();
+    state.lastBook = null;
+    state.lastBookMarketId = null;
+    void refreshBook(true);
+  }, 180);
 
   el.platform.addEventListener("change", () => {
     state.platform = el.platform.value;
@@ -1683,6 +1905,9 @@
   });
 
   [el.stopPercent, el.risk].forEach((input) => input.addEventListener("input", handleNumericChange));
+  [el.manualPrice, el.manualSpreadTicks, el.manualSlippageTicks].forEach((input) => {
+    input.addEventListener("input", handleManualFuturesChange);
+  });
   el.redline.addEventListener("input", debounce(() => {
     savePreferences();
     if ((numberValue(el.redline) || 0) > 10) {
@@ -1746,8 +1971,10 @@
 
   document.querySelectorAll("[data-execution]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (state.platform === "bybit-cfd" && button.dataset.execution === "limit") {
-        setMessage("Bybit CFD不是Post-only撮合盘口；为避免伪造Maker成交，本版仅开放全市价估算。", "warning");
+      if ((state.platform === "bybit-cfd" || isManualFutures()) && button.dataset.execution === "limit") {
+        setMessage(state.platform === "bybit-cfd"
+          ? "Bybit CFD不是Post-only撮合盘口；为避免伪造Maker成交，本版仅开放全市价估算。"
+          : "NinjaTrader/IBKR当前是手动期货情景，首版仅开放全市价估算。", "warning");
         return;
       }
       state.execution = button.dataset.execution;
@@ -1834,8 +2061,8 @@
         closeBybitSocket();
       }
       if (state.liveEnabled) setLiveState("paused", "后台暂停");
-    } else if (state.liveEnabled) {
-      if (!state.metadataFetchedAt || Date.now() - state.metadataFetchedAt > METADATA_SOFT_TTL) {
+    } else if (state.liveEnabled || isManualFutures()) {
+      if (!isManualFutures() && (!state.metadataFetchedAt || Date.now() - state.metadataFetchedAt > METADATA_SOFT_TTL)) {
         void loadMarkets({ preserveManual: true });
       } else {
         void refreshBook(true);
@@ -1860,6 +2087,7 @@
       state.liveEnabled &&
       !document.hidden &&
       state.platform !== "bybit-cfd" &&
+      !isManualFutures() &&
       Date.now() - (state.metadataFetchedAt || 0) > METADATA_SOFT_TTL
     ) {
       void loadMarkets({ preserveManual: true });

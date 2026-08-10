@@ -306,6 +306,37 @@ select {
   color: var(--amber);
 }
 
+.symbol-quick-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.symbol-quick-pick button {
+  min-height: 40px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.symbol-quick-pick button:hover,
+.symbol-quick-pick button.active {
+  border-color: rgba(184, 243, 74, 0.6);
+  color: var(--accent);
+}
+
+.manual-futures {
+  border-left: 2px solid rgba(244, 184, 74, 0.5);
+  padding-left: 14px;
+  animation: reveal-controls 220ms ease-out both;
+}
+
 .text-button {
   padding: 0;
   border: 0;

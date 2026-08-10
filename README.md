@@ -48,16 +48,27 @@
 |---|---|---|---|
 | 币安 U 本位 | Futures 公共接口 | 普通用户费率、BNB开关、手动覆盖 | 1000档原始盘口；超深度或市价保护边界即阻断 |
 | Hyperliquid 主市场 / XYZ | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
-| Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属完整交易 6U/手，仅收一次 | XAUUSD+ / XAGUSD 的多家流动性提供商指示性深度 |
+| Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手，仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ 的LP指示性深度 |
+| NinjaTrader 期货 | 手填终端价格与tick情景 | Free方案官方全包往返费，可手动覆盖 | ES / MES / NQ / MNQ；不是实时盘口 |
+| IBKR 期货 | 手填终端价格与tick情景 | Pro账户首档官方全包往返费，可手动覆盖 | ES / MES / NQ / MNQ；不是实时盘口 |
 
-### Bybit 黄金与白银特别说明
+### Bybit 黄金、白银与外汇特别说明
 
 - XAUUSD+ 按 **100 盎司/手**，XAGUSD 按 **5,000 盎司/手**计算；最小与步进均为 0.01 手。
-- 紧点差模式金属佣金为**完整开平交易合计 6U/手**，官方说明在开仓时一次扣除，不会再按两条腿乘二。
+- EURUSD+ 与 GBPUSD+ 按 **100,000 基础货币单位/手**计算；最小与步进同样为0.01手。
+- 紧点差模式金属、外汇佣金均为**完整开平交易合计 6U/手**，官方说明在开仓时一次扣除，不会再按两条腿乘二。
 - 保证金按公开分层规则估算，并假设没有同品种既有仓位；新闻和收开盘时可能临时降低杠杆。
 - Bybit 的 CFD 深度是多家流动性提供商给出的**参考流动性**，不是撮合订单簿，也不保证完全成交。休市、报价过期或深度不够时，页面会拒绝更新并将旧值灰化。
 - 当前适配使用 Bybit 官网正在使用的 TradFi WebSocket，并非承诺稳定的 V5 公共接口；协议改变时可能暂时不可用。
 - 本模型对应 **Tight-Spread 紧点差账户**。请先确认账户已切换到该模式；Zero-Fee 模式的更宽点差不能套用本结果。
+
+USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换算，本版宁可暂缓，也不直接套用美元报价公式。NAS100、SP500等CFD虽然可交易，Bybit目前没有公开多档指示性深度，因此不伪造大单冲击。
+
+### NinjaTrader 与 IBKR 为什么是手动情景？
+
+两者是经纪商，ES、MES、NQ、MNQ最终共享CME市场；差别主要来自佣金、路由与账户保证金。它们的实时深度都需要已登录账户、行情订阅和本机终端权限，不能把个人令牌安全地塞进公开GitHub网页。
+
+所以首版只做诚实可复核的模型：填写终端当前价格、买卖价差tick和每腿额外滑点tick，网站再叠加官方全包往返佣金。期货按整数张取整，**%R以实际取整后的价格风险为分母**；NinjaTrader保证金只显示日内参考值，IBKR保证金以账户what-if为准。
 
 ## 三个数字应该看哪个？
 
@@ -112,6 +123,11 @@ node tests/cost-core.test.js
 - [Bybit CFD 指示性流动性](https://www.bybit.com/en/help-center/article/CFD-Indicative-Liquidity)
 - [Bybit CFD 费用说明](https://www.bybit.com/en/help-center/article/Bybit-CFD-Fees-Explained)
 - [Bybit CFD 保证金规则](https://www.bybit.com/en/help-center/article/Margin-Calculations-on-CFD-Trading)
+- [Bybit首批指示性深度标的](https://announcements.bybit.com/en/article/tradfi-upgrade-indicative-liquidity-is-now-live--blta8f8ea29ea811b0f/)
+- [NinjaTrader期货佣金](https://ninjatrader.com/pricing/commissions/)
+- [IBKR期货佣金](https://www.interactivebrokers.com/en/pricing/commissions-futures.php)
+- [CME ES/MES规格](https://www.cmegroup.com/markets/equities/sp/micro-e-mini-sandp-500.contractSpecs.html)
+- [CME NQ/MNQ规格](https://www.cmegroup.com/markets/equities/nasdaq/micro-e-mini-nasdaq-100.contractSpecs.html)
 
 ---
 

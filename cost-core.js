@@ -177,7 +177,10 @@
     const asks = normalizeLevels(config.asks, "ask");
     const bestBid = bids[0].price;
     const bestAsk = asks[0].price;
-    if (bestAsk <= bestBid) throw new Error("盘口交叉或倒挂");
+    const allowLockedBook = config.allowLockedBook === true;
+    if (bestAsk < bestBid || (!allowLockedBook && bestAsk === bestBid)) {
+      throw new Error("盘口交叉或倒挂");
+    }
 
     const mid = (bestBid + bestAsk) / 2;
     const stopFraction = stopPercent / 100;
