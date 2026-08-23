@@ -104,6 +104,12 @@ assert.equal(priceProtected.status, "market_take_bound");
 // 6. Market quantity limits block the result instead of silently truncating it.
 const aboveMax = estimate({ maxQuantity: 100 });
 assert.equal(aboveMax.status, "above_market_max");
+close(aboveMax.maxAllowedNotional, 10_000);
+close(aboveMax.maxAllowedRisk, 100);
+close(aboveMax.minStopPercent, 2);
+const nonAlignedMax = estimate({ maxQuantity: 100.5, quantityStep: "1" });
+assert.equal(nonAlignedMax.maxExecutableQuantity, 100);
+close(nonAlignedMax.maxAllowedNotional, 10_000);
 assert.equal(estimate({ maxNotional: 10_000 }).status, "above_market_max_notional");
 const roundedToMax = estimate({ risk: 100.1, quantityStep: "1", maxQuantity: 100 });
 assert.equal(roundedToMax.status, "ok");
@@ -276,6 +282,9 @@ assert.equal(limitEstimate({
 }).status, "would_take_liquidity");
 assert.equal(limitEstimate({ priceTick: "0.05" }).status, "invalid_limit_tick");
 assert.equal(limitEstimate({ maxQuantity: 200 }).status, "above_market_max");
+const limitAboveMax = limitEstimate({ maxQuantity: 200 });
+close(limitAboveMax.maxAllowedRisk, 199.98);
+close(limitAboveMax.minStopPercent, 200 / 19_998 * 100);
 assert.equal(limitEstimate({ maxNotional: 10_000 }).status, "above_market_max_notional");
 assert.equal(limitEstimate({ minNotional: 30_000 }).status, "below_min_notional");
 assert.equal(limitEstimate({ stopPercent: 100 }).status, "invalid_stop_price");

@@ -222,6 +222,8 @@
     bookStale: false,
     metadataFetchedAt: null,
     metadataTimer: null,
+    metadataRefreshController: null,
+    metadataRefreshInFlight: null,
     hlDepthProfileIndex: 0,
     hlDepthProfileCheckedAt: 0,
     bybitSocket: null,
@@ -261,6 +263,18 @@
 
   function formatPercent(value, digits = 2) {
     return Number.isFinite(value) ? `${format(value, digits)}%` : "--";
+  }
+
+  function formatFloor(value, digits = 2) {
+    if (!Number.isFinite(value)) return "--";
+    const factor = 10 ** digits;
+    return format(Math.floor(value * factor + 1e-9) / factor, digits);
+  }
+
+  function formatCeil(value, digits = 2) {
+    if (!Number.isFinite(value)) return "--";
+    const factor = 10 ** digits;
+    return format(Math.ceil(value * factor - 1e-9) / factor, digits);
   }
 
   function formatBp(value, digits = 2) {
@@ -696,6 +710,36 @@
     return { markets, dexMeta };
   }
 
+  async function requestMarkets(platform, signal) {
+    if (platform === "binance") {
+      return { markets: await loadBinanceMarkets(signal), dexMeta: null };
+    }
+    if (platform === "bybit-cfd") {
+      return { markets: loadBybitMarkets(), dexMeta: null, metadataSource: "bundled-spec" };
+    }
+    return loadHyperliquidMarkets(platform === "hl-main" ? "" : "xyz", signal);
+  }
+
+  function marketRuleSignature(market, dexMeta = state.dexMeta) {
+    if (!market) return "";
+    return JSON.stringify({
+      quantityStep: market.quantityStep,
+      minQuantity: market.minQuantity,
+      maxQuantity: market.maxQuantity,
+      minNotional: market.minNotional,
+      maxNotional: market.maxNotional,
+      priceTick: market.priceTick,
+      marketTakeBound: market.marketTakeBound,
+      contractMultiplier: market.contractMultiplier,
+      leverage: market.leverage,
+      fixedRoundTripCommissionPerQuantity: market.fixedRoundTripCommissionPerQuantity,
+      contractType: market.sourceMeta?.contractType,
+      underlyingType: market.sourceMeta?.underlyingType,
+      deployerFeeScale: market.sourceMeta?.deployerFeeScale ?? dexMeta?.deployerFeeScale,
+      growthMode: market.sourceMeta?.growthMode,
+    });
+  }
+
   function hyperliquidMarketMax(maxLeverage) {
     const leverage = Number(maxLeverage);
     if (leverage >= 25) return 15_000_000;
@@ -733,6 +777,9 @@
 
   async function loadMarkets({ preserveManual = false } = {}) {
     if (state.platform !== "bybit-cfd") closeBybitSocket();
+    state.metadataRefreshController?.abort();
+    state.metadataRefreshController = null;
+    state.metadataRefreshInFlight = null;
     const preservedFees = preserveManual
       ? {
           taker: state.feeManual ? el.takerFee.value : null,
@@ -761,17 +808,7 @@
 
     let loaded;
     try {
-      if (state.platform === "binance") {
-        const markets = await loadBinanceMarkets(state.abortController.signal);
-        loaded = { markets, dexMeta: null };
-      } else if (state.platform === "bybit-cfd") {
-        loaded = { markets: loadBybitMarkets(), dexMeta: null, metadataSource: "bundled-spec" };
-      } else {
-        loaded = await loadHyperliquidMarkets(
-          state.platform === "hl-main" ? "" : "xyz",
-          state.abortController.signal,
-        );
-      }
+      loaded = await requestMarkets(state.platform, state.abortController.signal);
       if (token !== state.loadToken) return;
       state.metadataSource = loaded.metadataSource || "live";
       state.metadataFetchedAt = Date.now();
@@ -803,6 +840,91 @@
     const found = findMarket(preferred) || findMarket(defaultSymbol()) || state.markets[0];
     if (found) selectMarket(found, true, { preservedFees });
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
+  }
+
+  function restoreManualFees(preservedFees) {
+    if (preservedFees.taker != null) {
+      state.feeManual = true;
+      el.takerFee.value = preservedFees.taker;
+    }
+    if (preservedFees.maker != null) {
+      state.makerFeeManual = true;
+      el.makerFee.value = preservedFees.maker;
+    }
+    if (preservedFees.fixedCommission != null) {
+      state.fixedCommissionManual = true;
+      el.fixedCommission.value = preservedFees.fixedCommission;
+    }
+    updateFeeNotes();
+  }
+
+  async function refreshMarketsMetadata() {
+    if (state.platform === "bybit-cfd" || state.metadataRefreshInFlight) {
+      return state.metadataRefreshInFlight;
+    }
+    const platform = state.platform;
+    const selectedId = state.market?.id;
+    const previousRuleSignature = marketRuleSignature(state.market);
+    const controller = new AbortController();
+    state.metadataRefreshController = controller;
+    const promise = requestMarkets(platform, controller.signal)
+      .then((loaded) => {
+        if (
+          controller.signal.aborted ||
+          state.platform !== platform ||
+          state.market?.id !== selectedId
+        ) return;
+        const refreshedMarket = loaded.markets.find((market) => market.id === selectedId);
+        if (!refreshedMarket) {
+          setMessage(`合约${selectedId || ""}已不在最新交易列表，请重新选择。`, "error");
+          return;
+        }
+        const nextRuleSignature = marketRuleSignature(refreshedMarket, loaded.dexMeta);
+        const nextMetadataSource = loaded.metadataSource || "live";
+        const rulesChanged = nextRuleSignature !== previousRuleSignature;
+        const metadataSourceChanged = nextMetadataSource !== state.metadataSource;
+        const currentManualFees = {
+          taker: state.feeManual ? el.takerFee.value : null,
+          maker: state.makerFeeManual ? el.makerFee.value : null,
+          fixedCommission: state.fixedCommissionManual ? el.fixedCommission.value : null,
+        };
+        state.markets = loaded.markets;
+        state.dexMeta = loaded.dexMeta;
+        state.market = refreshedMarket;
+        state.metadataSource = nextMetadataSource;
+        state.metadataFetchedAt = Date.now();
+        if (state.metadataSource === "live") {
+          cacheMarkets(platform, marketCachePayload(loaded.markets, loaded.dexMeta));
+        }
+        populateSymbols();
+        el.symbol.value = refreshedMarket.id;
+        if (rulesChanged || metadataSourceChanged) {
+          applyAutoFee();
+          restoreManualFees(currentManualFees);
+        }
+        updateContext();
+        savePreferences();
+        if (rulesChanged || metadataSourceChanged) {
+          setMessage(
+            rulesChanged
+              ? "交易所下单规则刚刚变化，已用新规则重算并重新建立稳健窗口。"
+              : "实时市场元数据已恢复，已按最新费率重新计算。",
+            "warning",
+          );
+          recomputeFromLastBook();
+        }
+      })
+      .catch((error) => {
+        if (error.name === "AbortError" || controller.signal.aborted || state.platform !== platform) return;
+        state.metadataFetchedAt = Date.now();
+        console.warn("后台市场元数据刷新失败，继续使用当前规则：", error);
+      })
+      .finally(() => {
+        if (state.metadataRefreshController === controller) state.metadataRefreshController = null;
+        if (state.metadataRefreshInFlight === promise) state.metadataRefreshInFlight = null;
+      });
+    state.metadataRefreshInFlight = promise;
+    return promise;
   }
 
   function defaultSymbol() {
@@ -860,7 +982,10 @@
       savePreferences();
       return;
     }
-    if (changed) cancelBookRequest();
+    if (changed) {
+      cancelBookRequest();
+      state.metadataRefreshController?.abort();
+    }
     state.market = market;
     el.symbol.value = market.id;
     state.lastBook = changed ? null : state.lastBook;
@@ -1282,6 +1407,9 @@
         state.lastBook = book;
         state.lastBookMarketId = marketId;
         if (result.status !== "ok") {
+          state.errorCount = 0;
+          state.lastSuccessAt = book.time;
+          state.bookStale = false;
           renderInvalid(result);
           return;
         }
@@ -1564,6 +1692,7 @@
   function renderEmpty() {
     el.resultsPanel.dataset.stale = "false";
     el.heroResult.dataset.zone = "idle";
+    el.heroLabel.textContent = "滚动最差成本 / 风险";
     el.heroValue.textContent = "--";
     el.heroVerdict.textContent = state.market ? "等待第一帧盘口" : "选择平台和标的";
     el.riskFill.style.width = "0%";
@@ -1592,6 +1721,7 @@
     el.bookBar.style.width = "0%";
     el.depthState.textContent = "--";
     el.depthQuality.textContent = "等待盘口";
+    el.depthQuality.classList.remove("warning-note");
     el.limitAssumption.hidden = true;
     el.copySummary.disabled = true;
   }
@@ -1612,10 +1742,44 @@
       invalid_limit_tick: `限价不符合该合约最小价格步进${format(result.priceTick, 8)}，请调整后再算。`,
       invalid_stop_price: "止损距离使计划止损价无效，请检查方向与止损百分比。",
     };
-    setMessage(messages[result.status] || "当前参数无法形成有效估算。", "error");
+    const depthStatuses = ["insufficient_snapshot_depth", "insufficient_stop_depth"];
+    const boundaryStatuses = ["market_take_bound"];
+    const invalidKind = depthStatuses.includes(result.status)
+      ? "可见深度不足"
+      : boundaryStatuses.includes(result.status)
+        ? "触及市价保护"
+        : "参数超限";
+    let message = messages[result.status] || "当前参数无法形成有效估算。";
+    el.heroResult.dataset.zone = "warn";
+    el.heroLabel.textContent = "当前参数不可估算";
+    el.heroVerdict.textContent = `${invalidKind} · 盘口已正常收到`;
+    el.frameCount.textContent = `0 / ${maxSamples()} 有效帧`;
+    el.depthState.textContent = invalidKind;
+    el.depthQuality.textContent = depthStatuses.includes(result.status)
+      ? "盘口已收到 · 公开可见深度不足"
+      : boundaryStatuses.includes(result.status)
+        ? "盘口已收到 · 超出交易所市价保护边界"
+        : "盘口已收到 · 未满足交易所下单规则";
+    el.depthQuality.classList.add("warning-note");
+    if (Number.isFinite(result.mid)) {
+      el.midValue.textContent = format(result.mid, 8);
+      el.spreadValue.textContent = "盘口读取正常";
+    }
+    if (Number.isFinite(result.theoreticalNotional)) {
+      el.positionValue.textContent = `需要 ${format(result.theoreticalNotional, 2)} U`;
+    }
+    if (Number.isFinite(result.quantity)) {
+      el.quantityValue.textContent = `需要数量 ${format(result.quantity, 8)}`;
+    }
+    if (result.status === "above_market_max") {
+      const maxExecutableQuantity = result.maxExecutableQuantity ?? result.maxQuantity;
+      el.quantityValue.textContent = `需要 ${format(result.quantity, 8)} · 上限 ${format(maxExecutableQuantity, 8)}`;
+      message += ` 当前盘口下可改为风险不高于${formatFloor(result.maxAllowedRisk, 2)}U，或把止损放宽到至少${formatCeil(result.minStopPercent, 4)}%。`;
+    }
+    setMessage(message, "warning");
     el.resultsPanel.dataset.stale = "false";
-    setLiveState("error", "不可估算");
-    if (["insufficient_snapshot_depth", "insufficient_stop_depth"].includes(result.status)) {
+    setLiveState("paused", invalidKind, state.lastBook?.time);
+    if (depthStatuses.includes(result.status)) {
       el.buyDepth.textContent = `${format(result.buy?.totalVisibleNotional, 0)} U可见`;
       el.sellDepth.textContent = `${format(result.sell?.totalVisibleNotional, 0)} U可见`;
       el.depthState.textContent = "扩展深度仍不足";
@@ -1913,7 +2077,7 @@
       if (state.liveEnabled) setLiveState("paused", "后台暂停");
     } else if (state.liveEnabled) {
       if (!state.metadataFetchedAt || Date.now() - state.metadataFetchedAt > METADATA_SOFT_TTL) {
-        void loadMarkets({ preserveManual: true });
+        void refreshMarketsMetadata().finally(() => void refreshBook(true));
       } else {
         void refreshBook(true);
       }
@@ -1924,6 +2088,7 @@
     window.clearTimeout(state.timer);
     window.clearInterval(state.metadataTimer);
     state.abortController?.abort();
+    state.metadataRefreshController?.abort();
     state.bookController?.abort();
     closeBybitSocket();
   });
@@ -1939,7 +2104,7 @@
       state.platform !== "bybit-cfd" &&
       Date.now() - (state.metadataFetchedAt || 0) > METADATA_SOFT_TTL
     ) {
-      void loadMarkets({ preserveManual: true });
+      void refreshMarketsMetadata();
     }
   }, METADATA_SOFT_TTL);
 

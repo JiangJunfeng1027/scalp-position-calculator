@@ -1,11 +1,11 @@
-const CACHE_NAME = "scalp-position-calculator-v15";
+const CACHE_NAME = "scalp-position-calculator-v16";
 const ASSETS = [
   "./",
   "./index.html",
   "./cost.html",
-  "./cost.css",
-  "./cost-core.js",
-  "./cost.js",
+  "./cost.css?v=16",
+  "./cost-core.js?v=16",
+  "./cost.js?v=16",
   "./manifest.webmanifest?v=5",
   "./favicon-v5.ico",
   "./favicon-32-v5.png",

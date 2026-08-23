@@ -204,13 +204,21 @@
       };
     }
     if (quantity > maxQuantity + 1e-12) {
+      const maxExecutableQuantity = floorToStep(maxQuantity, quantityStep);
+      const maxAllowedNotional = maxExecutableQuantity * contractMultiplier * mid;
       return {
         status: "above_market_max",
         mid,
+        requestedRisk,
+        stopPercent,
         theoreticalNotional,
         rawQuantity,
         quantity,
         maxQuantity,
+        maxExecutableQuantity,
+        maxAllowedNotional,
+        maxAllowedRisk: maxAllowedNotional * stopFraction,
+        minStopPercent: requestedRisk / maxAllowedNotional * 100,
         contractMultiplier,
       };
     }
@@ -441,7 +449,17 @@
       return { ...sized, status: "below_min_quantity", minQuantity };
     }
     if (quantity > maxQuantity + 1e-12) {
-      return { ...sized, status: "above_market_max", maxQuantity };
+      const maxExecutableQuantity = floorToStep(maxQuantity, quantityStep);
+      const maxAllowedNotional = maxExecutableQuantity * contractMultiplier * limitPrice;
+      return {
+        ...sized,
+        status: "above_market_max",
+        maxQuantity,
+        maxExecutableQuantity,
+        maxAllowedNotional,
+        maxAllowedRisk: maxAllowedNotional * stopFraction,
+        minStopPercent: requestedRisk / maxAllowedNotional * 100,
+      };
     }
 
     const actualNotional = quantity * contractMultiplier * limitPrice;
