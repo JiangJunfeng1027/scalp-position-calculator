@@ -46,6 +46,36 @@
     return Math.abs(units - Math.round(units)) <= 1e-8 * Math.max(1, Math.abs(units));
   }
 
+  function decumulateBybitLevels(levels, side) {
+    if (!Array.isArray(levels) || !levels.length) {
+      throw new Error(`Bybit${side === "bid" || side === "买" ? "买" : "卖"}盘为空`);
+    }
+    const output = [];
+    let previous = 0;
+    const isNumeric = (value) => (
+      (typeof value === "number" || (typeof value === "string" && value.trim() !== "")) &&
+      Number.isFinite(Number(value))
+    );
+    for (const level of levels) {
+      if (!Array.isArray(level) || !isNumeric(level[0]) || !isNumeric(level[1])) {
+        throw new Error("Bybit指示性深度包含无效价格或累计数量");
+      }
+      const price = Number(level[0]);
+      const cumulative = Number(level[1]);
+      const size = cumulative - previous;
+      if (price <= 0 || cumulative < 0 || size < 0) {
+        throw new Error("Bybit指示性深度包含无效价格或累计数量");
+      }
+      previous = cumulative;
+      // Rounded cumulative lots can repeat across price levels. Those levels
+      // add no visible size; keeping them would invent liquidity or reject a
+      // valid snapshot. Preserve source order for normalizeLevels to validate.
+      if (size > 0) output.push([String(price), String(size)]);
+    }
+    if (!output.length) throw new Error("Bybit指示性深度没有正数量");
+    return output;
+  }
+
   function normalizeLevels(levels, side) {
     if (!Array.isArray(levels) || levels.length === 0) {
       throw new Error(`${side === "bid" ? "买" : "卖"}盘为空`);
@@ -771,6 +801,7 @@
     decimalPlaces,
     floorToStep,
     isStepAligned,
+    decumulateBybitLevels,
     normalizeLevels,
     bookSignature,
     resolveBybitServerWallTime,

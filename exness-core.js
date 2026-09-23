@@ -91,5 +91,96 @@
       costPer100k: netBp * 10, costPer100Risk: riskPercent,
       totalLossR: 1 + riskPercent / 100, minStopPercent: netBp / redline, redline };
   }
-  return { checkedAt, accounts, markets, commission, estimate, referenceBp, estimateRatio };
+  // Proxy books supply a size-dependent impact scenario, not Exness liquidity.
+  // Quantities in the proxy book are contracts/lots; prices are per underlying
+  // unit. Convert equal USD notional before sweeping, and apply that multiplier
+  // again when converting a price difference back to USD.
+  function estimateProxy(c) {
+    const read = (key, label, positive = false) => {
+      const raw = c[key];
+      if (raw == null || String(raw).trim() === "") throw new Error(`请填写${label}`);
+      const value = Number(raw);
+      if (!Number.isFinite(value) || (positive ? value <= 0 : value < 0)) {
+        throw new Error(`${label}须为${positive ? "大于" : "不小于"}0的数字`);
+      }
+      return value;
+    };
+    const market = markets.find(m => m.id === c.symbol);
+    if (!market) throw new Error("Exness标的无效");
+    const roundTripCommission = commission(market, c.account);
+    const risk = read("risk", "风险预算", true);
+    const stopPercent = read("stopPercent", "止损距离", true);
+    if (stopPercent >= 100) throw new Error("止损距离须小于100%");
+    const redline = read("redline", "成本红线", true);
+    if (redline > 10) throw new Error("成本红线须不高于10%R");
+    const proxyMultiplier = read("proxyMultiplier", "参考盘口合约乘数", true);
+    const slipBp = read("slipBp", "额外滑点率");
+    const rebateBp = read("rebateBp", "返佣率");
+    const method = c.method ?? "conservative";
+    if (!["conservative", "directional"].includes(method)) throw new Error("扫档计算方式无效");
+    const hasBase = c.baseBp != null && String(c.baseBp).trim() !== "";
+    const configuredBaseBp = hasBase ? read("baseBp", "完整往返成本率") : null;
+    const normalize = (levels, side) => {
+      if (Array.isArray(levels)) {
+        // normalizeLevels uses Number(); reject missing values before coercion.
+        for (const level of levels) {
+          const price = Array.isArray(level) ? level[0] : level?.px;
+          const size = Array.isArray(level) ? level[1] : level?.sz;
+          if ([price, size].some(value => value == null || typeof value === "boolean" || String(value).trim() === "")) {
+            throw new Error("盘口包含无效价格或数量");
+          }
+        }
+      }
+      const result = core.normalizeLevels(levels, side).filter(level => level.size > 0);
+      if (!result.length) throw new Error(`${side === "bid" ? "买" : "卖"}盘没有有效数量`);
+      return result;
+    };
+    const bids = normalize(c.bids, "bid"), asks = normalize(c.asks, "ask");
+    const bid = bids[0].price, ask = asks[0].price;
+    if (ask < bid) throw new Error("参考盘口买卖价格倒挂，无法估算");
+    const mid = bid / 2 + ask / 2;
+    const notional = risk / (stopPercent / 100);
+    const units = notional / mid;
+    const proxyQuantity = units / proxyMultiplier;
+    const estimatedLots = units / market.multiplier;
+    if (![notional, units, proxyQuantity, estimatedLots].every(value => Number.isFinite(value) && value > 0)) {
+      throw new Error("输入数值过大或止损距离过小，请调整");
+    }
+    const buy = core.sweep(asks, proxyQuantity, proxyMultiplier);
+    const sell = core.sweep(bids, proxyQuantity, proxyMultiplier);
+    if (!buy.complete || !sell.complete || buy.vwap == null || sell.vwap == null) {
+      throw new Error("参考盘口深度不足以覆盖所需仓位；不会截仓或外推成本");
+    }
+    const buyImpactCost = Math.max(0, buy.vwap - ask) * units;
+    const sellImpactCost = Math.max(0, bid - sell.vwap) * units;
+    const impactCost = method === "conservative"
+      ? 2 * Math.max(buyImpactCost, sellImpactCost)
+      : buyImpactCost + sellImpactCost;
+    const proxySpread = ask - bid;
+    const observedReferenceSpreadCost = proxySpread * units;
+    const referenceSpreadCost = hasBase ? 0 : observedReferenceSpreadCost;
+    const exnessCommissionCost = hasBase ? 0 : roundTripCommission * estimatedLots;
+    const baseCost = hasBase ? notional * (configuredBaseBp / 10000) : referenceSpreadCost + exnessCommissionCost;
+    const baseBp = hasBase ? configuredBaseBp : baseCost / notional * 10000;
+    if (rebateBp > baseBp) throw new Error("返佣率不能超过基础往返成本率，不能抵消扫档冲击");
+    const extraSlipCost = notional * (slipBp / 10000);
+    const rebateValue = notional * (rebateBp / 10000);
+    const cost = Math.max(0, baseCost - rebateValue) + impactCost + extraSlipCost;
+    const totalLoss = risk + cost;
+    const riskPercent = cost / risk * 100;
+    const totalLossR = totalLoss / risk;
+    const netBp = cost / notional * 10000;
+    if (![mid, baseCost, baseBp, impactCost, buyImpactCost, sellImpactCost, extraSlipCost,
+      rebateValue, observedReferenceSpreadCost, exnessCommissionCost, cost, totalLoss,
+      riskPercent, totalLossR, netBp].every(Number.isFinite)) {
+      throw new Error("输入数值过大或止损距离过小，请调整");
+    }
+    return { status: "ok", symbol: c.symbol, account: c.account, risk, stopPercent, notional,
+      cost, totalLoss, totalLossR, riskPercent, netBp, baseBp, baseCost, impactCost,
+      buyImpactCost, sellImpactCost, extraSlipCost, rebateValue, referenceSpreadCost,
+      exnessCommissionCost, baselineMode: hasBase ? "configured" : "proxy-spread",
+      bid, ask, mid, proxySpread, observedReferenceSpreadCost, proxyQuantity, proxyMultiplier,
+      estimatedLots, units, buy, sell, slipBp, rebateBp, method, redline };
+  }
+  return { checkedAt, accounts, markets, commission, estimate, referenceBp, estimateRatio, estimateProxy };
 });

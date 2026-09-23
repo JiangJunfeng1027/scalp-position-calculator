@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=20" />
+    <link rel="stylesheet" href="./cost.css?v=21" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -51,7 +51,7 @@
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
               <option value="bybit-cfd">Bybit CFD（紧点差账户）</option>
-              <option value="exness">Exness（固定费率估算）</option>
+              <option value="exness">Exness（参考深度近似）</option>
             </select>
           </div>
 
@@ -84,9 +84,9 @@
                 </select>
               </div>
               <div class="control-block">
-                <div class="label-row"><label for="exBaseBp">完整往返成本率</label><button id="exReset" type="button" class="text-button">恢复参考值</button></div>
-                <div class="number-field"><input id="exBaseBp" inputmode="decimal" placeholder="点差＋双边佣金" /><span>万分之</span></div>
-                <p class="field-note">填1代表万1：每10万U仓位完整进出成本10U。已含点差和双边佣金，不再乘2。</p>
+                <div class="label-row"><label for="exBaseBp">基础往返费率（可留空）</label><button id="exReset" type="button" class="text-button">恢复默认</button></div>
+                <div class="number-field"><input id="exBaseBp" inputmode="decimal" placeholder="自动：参考点差＋Exness佣金" /><span>万分之</span></div>
+                <p class="field-note">填1代表万1，包含点差＋双边佣金，不含扫档冲击。留空按参考点差＋Exness佣金近似。</p>
               </div>
               <div class="input-pair">
                 <div class="control-block"><label for="exRebateBp">额外返佣折扣</label><div class="number-field"><input id="exRebateBp" inputmode="decimal" value="0" /><span>万分之</span></div></div>
@@ -215,7 +215,7 @@
           </div>
 
           <p class="scope-note">
-            只读公共行情或手动输入，不连接账户、不会下单。Exness为参考费率估算；Hyperliquid聚合深度是近似值；Bybit为LP指示性深度。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
+            只读公共行情，不连接账户、不会下单。Exness使用币安/Bybit参考深度近似；Bybit为LP指示性深度。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
           </p>
         </aside>
 
@@ -235,8 +235,8 @@
 
             <div id="exScaleNote" class="exness-scale-note" hidden>
               <strong id="exRiskEquation">--</strong>
-              <p>止损距离、费率不变时，预算和费用等比例变化，所以百分比不变。</p>
-              <p>规模相关滑点未评估，实际总成本占风险未知；颜色仅评价当前固定费率情景。</p>
+              <p id="exProxyDescription"></p>
+              <p>仓位吃到更差报价时，成本比例会上升；首档承接充足时仍可能相同。跨平台近似，不是Exness真实盘口。</p>
             </div>
 
             <div class="risk-track" aria-label="成本风险刻度">
@@ -283,9 +283,9 @@
 
           <section class="primary-metrics" id="exnessMetrics" aria-label="Exness参考结果" hidden>
             <div><span>估算名义仓位</span><strong id="exPosition">--</strong><small>风险预算÷止损距离，未作手数取整</small></div>
-            <div><span>固定费率情景成本</span><strong id="exCost">--</strong><small id="exNetRate">设定往返成本率 --</small></div>
-            <div><span>固定费率情景总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">风险预算＋情景成本</small></div>
-            <div><span id="exThresholdLabel">满足5%R红线所需止损</span><strong id="exMinStop">--</strong><small>实际止损须由交易结构决定</small></div>
+            <div><span>近似摩擦成本</span><strong id="exCost">--</strong><small id="exNetRate">含冲击总成本率 --</small></div>
+            <div><span>近似止损总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">风险预算＋近似成本</small></div>
+            <div><span>参考盘口额外冲击</span><strong id="exImpact">--</strong><small id="exDepthDetails">按较差侧×2</small></div>
           </section>
 
           <div class="limit-assumption" id="limitAssumption" hidden>
@@ -301,6 +301,7 @@
               </div>
               <button type="button" id="copySummary" class="text-button">复制结果</button>
             </div>
+            <p id="exProxyBreakdown" class="field-note" hidden></p>
             <div class="breakdown-row">
               <span id="feeBreakdownLabel">双边手续费</span>
               <div class="micro-track"><i id="feeBar"></i></div>
@@ -364,9 +365,9 @@
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=20"></script>
-    <script src="./exness-core.js?v=20"></script>
-    <script src="./exness-ui.js?v=20"></script>
-    <script src="./cost.js?v=20"></script>
+    <script src="./cost-core.js?v=21"></script>
+    <script src="./exness-core.js?v=21"></script>
+    <script src="./exness-ui.js?v=21"></script>
+    <script src="./cost.js?v=21"></script>
   </body>
 </html>

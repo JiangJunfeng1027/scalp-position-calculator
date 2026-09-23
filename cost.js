@@ -14,6 +14,14 @@
     indicative: true,
     approximate: false,
   };
+  // User-selected cross-venue depth proxies; these are not Exness books.
+  const EXNESS_PROXY_SOURCES = {
+    BTCUSD: { venue: "binance", symbol: "BTCUSDT", multiplier: 1, label: "币安 BTCUSDT" },
+    ETHUSD: { venue: "binance", symbol: "ETHUSDT", multiplier: 1, label: "币安 ETHUSDT" },
+    XAUUSD: { venue: "bybit", symbol: "XAUUSD+", multiplier: 100, label: "Bybit XAUUSD+" },
+    XAGUSD: { venue: "bybit", symbol: "XAGUSD", multiplier: 5000, label: "Bybit XAGUSD" },
+    USTEC: { venue: "bybit", symbol: "NAS100", multiplier: 1, label: "Bybit NAS100" },
+  };
   const BYBIT_CFD_MARKETS = [
     {
       id: "XAUUSD+",
@@ -235,7 +243,8 @@
     lastSourceTime: null,
   };
 
-  const exnessView = window.createExnessView({ el, state, format, numberValue, renderEmpty, setLiveState, setMessage });
+  const exnessView = window.createExnessView({ el, state, format, numberValue, renderEmpty, setLiveState, setMessage,
+    sources: EXNESS_PROXY_SOURCES, loadBook: fetchExnessProxyBook, closeSource: closeBybitSocket });
 
   function usesFixedCommission(platform = state.platform) {
     return platform === "bybit-cfd";
@@ -467,24 +476,15 @@
   }
 
   function decumulateBybitLevels(levels, side) {
-    if (!Array.isArray(levels) || !levels.length) throw new Error(`Bybit${side}盘为空`);
-    let previous = 0;
-    return levels.map((level) => {
-      const price = Number(level?.[0]);
-      const cumulative = Number(level?.[1]);
-      const size = cumulative - previous;
-      previous = cumulative;
-      if (!(price > 0) || !(cumulative > 0) || !(size > 0)) {
-        throw new Error("Bybit指示性深度包含无效累计数量");
-      }
-      return [String(price), String(size)];
-    });
+    return core.decumulateBybitLevels(levels, side);
   }
 
   function normalizeBybitBook(payload) {
     const data = Array.isArray(payload?.data) ? payload.data[0] : payload?.data;
     const symbol = String(data?.s || payload?.topic?.slice(BYBIT_BOOK_PREFIX.length) || "");
-    if (!symbol || !BYBIT_CFD_MARKETS.some((market) => market.bookSymbol === symbol)) {
+    const knownSymbol = BYBIT_CFD_MARKETS.some((market) => market.bookSymbol === symbol) ||
+      Object.values(EXNESS_PROXY_SOURCES).some(source => source.venue === "bybit" && source.symbol === symbol);
+    if (!symbol || !knownSymbol) {
       throw new Error("Bybit盘口标的无法识别");
     }
     const asks = decumulateBybitLevels(data?.a, "卖");
@@ -631,10 +631,9 @@
     });
   }
 
-  async function fetchBybitBook(signal) {
+  async function fetchBybitBook(signal, symbol = state.market.bookSymbol) {
     await ensureBybitSocket();
     if (signal?.aborted) throw abortError();
-    const symbol = state.market.bookSymbol;
     subscribeBybitSymbol(symbol);
     const book = await waitForBybitBook(symbol, signal);
     const age = Date.now() - book.sourceTime;
@@ -645,6 +644,19 @@
       throw new Error(`Bybit流动性提供商报价已过期${Math.round(age / 60_000)}分钟；市场可能休市，已拒绝估算`);
     }
     return book;
+  }
+
+  async function fetchExnessProxyBook(market, signal) {
+    const source = EXNESS_PROXY_SOURCES[market.id];
+    if (!source) throw new Error("该Exness标的尚未配置参考盘口");
+    if (source.venue === "bybit") return fetchBybitBook(signal, source.symbol);
+    closeBybitSocket();
+    const raw = await fetchJson(`${BINANCE_API}/fapi/v1/depth?symbol=${source.symbol}&limit=1000`, { signal });
+    const sourceTime = Number(raw.T || raw.E);
+    if (!(sourceTime > 0)) throw new Error("币安参考盘口缺少报价时间");
+    if (!Array.isArray(raw.bids) || !Array.isArray(raw.asks)) throw new Error("币安参考盘口结构异常");
+    return { id: `bn-proxy:${source.symbol}:${core.bookSignature(raw.bids, raw.asks)}`,
+      bids: raw.bids, asks: raw.asks, symbol: source.symbol, time: sourceTime, sourceTime };
   }
 
   function relevantBinanceFilters(symbol) {
@@ -780,6 +792,7 @@
   }
 
   async function loadMarkets({ preserveManual = false } = {}) {
+    exnessView.stop();
     if (state.platform !== "bybit-cfd") closeBybitSocket();
     state.metadataRefreshController?.abort();
     state.metadataRefreshController = null;
@@ -843,7 +856,7 @@
     const preferred = el.symbol.value.trim() || defaultSymbol();
     const found = findMarket(preferred) || findMarket(defaultSymbol()) || state.markets[0];
     if (found) selectMarket(found, true, { preservedFees });
-    if (state.platform === "exness") { exnessView.render(); return; }
+    if (state.platform === "exness") return;
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
   }
 
@@ -1398,7 +1411,7 @@
   }
 
   async function refreshBook(manual = false) {
-    if (state.platform === "exness") { exnessView.render(); return; }
+    if (state.platform === "exness") return exnessView.refresh(manual);
     if (!state.market || (!state.liveEnabled && !manual) || (document.hidden && !manual)) return;
     if (state.inFlight) return state.inFlight;
     let inputs;
@@ -1830,7 +1843,7 @@
     const isExness = state.platform === "exness";
     document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
     document.getElementById("controlIntro").textContent = isExness
-      ? "风险预算不含摩擦。按固定费率估算：预算决定仓位和成本金额，止损距离与费率决定成本比例。"
+      ? "风险预算不含摩擦。按Exness费用与参考盘口逐档估算；BTC/ETH参考币安，金银/纳指参考Bybit。"
       : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
     const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');
@@ -1866,13 +1879,14 @@
     document.getElementById("exnessMetrics").hidden = !isExness;
     document.getElementById("exScaleNote").hidden = true;
     document.querySelectorAll(".breakdown > .breakdown-row").forEach(node => node.hidden = isExness);
-    document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "固定费率 ÷ 止损距离" : "钱消失在哪里";
+    document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "基础费用＋参考盘口冲击" : "钱消失在哪里";
+    document.getElementById("exProxyBreakdown").hidden = !isExness;
     el.risk.closest(".control-block").hidden = false;
     document.querySelector('label[for="risk"]').textContent = isExness ? "风险预算（不含成本）" : "价格风险";
     el.stopPercent.closest(".input-pair").classList.remove("single-column");
     el.redline.closest(".input-pair").hidden = isExness;
     el.executionNote.closest(".control-block").hidden = isExness;
-    el.refreshNow.parentElement.hidden = isExness;
+    el.refreshNow.parentElement.hidden = false;
     document.querySelector(".stat-tabs").hidden = isExness;
     document.querySelector(".rolling").hidden = isExness;
     document.querySelector(".execution").hidden = isExness;
@@ -1881,9 +1895,9 @@
       window.clearTimeout(state.timer);
       el.takerFeeBlock.hidden = true; el.fixedCommissionBlock.hidden = true;
       el.methodBlock.hidden = true; el.intervalBlock.hidden = true;
-      el.windowBlock.parentElement.hidden = true; el.toggleLive.hidden = true;
-      el.refreshNow.textContent = "重新计算";
-      el.executionNote.textContent = "按一次完整买卖价差＋两边佣金＋手动滑点−手动返佣计算。无公开深度，无法判断大单成交成本。";
+      el.windowBlock.parentElement.hidden = true;
+      el.refreshNow.textContent = "刷新参考盘口";
+      el.executionNote.textContent = "Exness基础费用＋参考盘口较差侧额外冲击×2＋手动滑点−返佣。跨平台近似，不代表Exness可成交深度。";
       el.intervalBlock.parentElement.classList.add("single-column");
     }
     if (isLimit && state.lastBook) updateAutoLimitPrice(state.lastBook);
@@ -2121,6 +2135,11 @@
     state.liveEnabled = !state.liveEnabled;
     el.toggleLive.textContent = state.liveEnabled ? "暂停自动刷新" : "继续自动刷新";
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "恢复刷新" : "已暂停");
+    if (state.platform === "exness") {
+      if (state.liveEnabled) void exnessView.refresh(true);
+      else exnessView.pause();
+      return;
+    }
     if (state.liveEnabled) void refreshBook(true);
     else {
       window.clearTimeout(state.timer);
@@ -2133,7 +2152,12 @@
 
   el.copySummary.addEventListener("click", copySummary);
   document.addEventListener("visibilitychange", () => {
-    if (state.platform === "exness") { exnessView.render(); return; }
+    if (state.platform === "exness") {
+      if (document.hidden) exnessView.pause();
+      else if (state.liveEnabled) void exnessView.refresh(true);
+      else exnessView.render();
+      return;
+    }
     if (document.hidden) {
       window.clearTimeout(state.timer);
       if (state.platform === "bybit-cfd") {
@@ -2151,6 +2175,7 @@
   });
 
   window.addEventListener("beforeunload", () => {
+    exnessView.stop();
     window.clearTimeout(state.timer);
     window.clearInterval(state.metadataTimer);
     state.abortController?.abort();

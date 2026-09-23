@@ -66,6 +66,41 @@ assert.throws(
   /晚于接收时间/,
 );
 
+// A live XAGUSD snapshot (2026-09-23) repeats rounded cumulative lot sizes.
+// Convert cumulative sizes once, skipping zero increments without inventing
+// volume. The last cumulative quantity must equal the sum of visible sizes.
+const xagCumulativeAsks = [
+  ["65.421", "2.8"], ["65.486", "2.8"], ["65.499", "3.18"],
+  ["65.502", "3.18"], ["65.503", "3.36"], ["65.504", "3.36"],
+  ["65.505", "4.33"], ["65.506", "5.15"], ["65.507", "6.64"],
+  ["65.508", "7.97"],
+];
+const xagIncrementalAsks = core.decumulateBybitLevels(xagCumulativeAsks, "ask");
+assert.equal(xagIncrementalAsks.length, 7);
+assert.deepEqual(xagIncrementalAsks.map(([price]) => price), [
+  "65.421", "65.499", "65.503", "65.505", "65.506", "65.507", "65.508",
+]);
+close(xagIncrementalAsks.reduce((total, [, size]) => total + Number(size), 0), 7.97);
+close(core.normalizeLevels(xagIncrementalAsks, "ask")[1].size, 0.38);
+assert.deepEqual(xagCumulativeAsks[1], ["65.486", "2.8"]);
+assert.deepEqual(core.decumulateBybitLevels([[100, 0], [99, 2], [98, 2]], "bid"), [["99", "2"]]);
+assert.deepEqual(core.decumulateBybitLevels([[100, 3]], "bid"), [["100", "3"]]);
+assert.throws(() => core.decumulateBybitLevels([], "bid"), /买盘为空/);
+assert.throws(() => core.decumulateBybitLevels(null, "ask"), /卖盘为空/);
+assert.throws(() => core.decumulateBybitLevels([[100, 0], [101, 0]], "ask"), /没有正数量/);
+assert.throws(() => core.decumulateBybitLevels([[100, 2], [101, 1]], "ask"), /累计数量/);
+for (const invalid of [-1, NaN, Infinity, -Infinity, "no-size", "", " ", null, undefined, false]) {
+  assert.throws(() => core.decumulateBybitLevels([[100, invalid]], "ask"), /累计数量/);
+}
+for (const invalid of [0, -1, NaN, Infinity, "no-price", "", null, undefined, false]) {
+  assert.throws(() => core.decumulateBybitLevels([[100, 1], [invalid, 1]], "ask"), /无效价格/);
+}
+assert.throws(() => core.decumulateBybitLevels([null], "ask"), /无效价格/);
+assert.throws(() => core.decumulateBybitLevels([{ px: 100, sz: 1 }], "ask"), /无效价格/);
+assert.throws(() => core.normalizeLevels(
+  core.decumulateBybitLevels([[100, 1], [99, 2]], "ask"), "ask",
+), /卖盘排序异常/);
+
 // 1. Fixed risk and stop map to the expected notional.
 const base = estimate();
 assert.equal(base.status, "ok");
