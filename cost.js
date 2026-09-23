@@ -235,6 +235,8 @@
     lastSourceTime: null,
   };
 
+  const exnessView = window.createExnessView({ el, state, format, renderEmpty, setLiveState, setMessage });
+
   function usesFixedCommission(platform = state.platform) {
     return platform === "bybit-cfd";
   }
@@ -342,7 +344,7 @@
   function loadPreferences() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      if (["binance", "hl-main", "hl-xyz", "bybit-cfd"].includes(saved.platform)) {
+      if (["binance", "hl-main", "hl-xyz", "bybit-cfd", "exness"].includes(saved.platform)) {
         state.platform = saved.platform;
         el.platform.value = saved.platform;
       }
@@ -711,6 +713,7 @@
   }
 
   async function requestMarkets(platform, signal) {
+    if (platform === "exness") return { markets: window.ExnessCore.markets, dexMeta: null, metadataSource: "manual" };
     if (platform === "binance") {
       return { markets: await loadBinanceMarkets(signal), dexMeta: null };
     }
@@ -769,6 +772,7 @@
   }
 
   function platformLabel() {
+    if (state.platform === "exness") return "EXNESS · 手动情景";
     if (state.platform === "binance") return "BINANCE USDⓈ-M";
     if (state.platform === "hl-main") return "HYPERLIQUID MAIN";
     if (state.platform === "bybit-cfd") return "BYBIT TRADFI CFD";
@@ -839,6 +843,7 @@
     const preferred = el.symbol.value.trim() || defaultSymbol();
     const found = findMarket(preferred) || findMarket(defaultSymbol()) || state.markets[0];
     if (found) selectMarket(found, true, { preservedFees });
+    if (state.platform === "exness") { exnessView.render(); return; }
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
   }
 
@@ -859,7 +864,7 @@
   }
 
   async function refreshMarketsMetadata() {
-    if (state.platform === "bybit-cfd" || state.metadataRefreshInFlight) {
+    if (["bybit-cfd", "exness"].includes(state.platform) || state.metadataRefreshInFlight) {
       return state.metadataRefreshInFlight;
     }
     const platform = state.platform;
@@ -928,6 +933,7 @@
   }
 
   function defaultSymbol() {
+    if (state.platform === "exness") return "BTCUSD";
     if (state.platform === "binance") return "BEATUSDT";
     if (state.platform === "hl-main") return "BTC";
     if (state.platform === "bybit-cfd") return "XAUUSD+";
@@ -946,7 +952,7 @@
     el.symbols.appendChild(fragment);
     el.symbolCount.textContent = `${state.markets.length}个`;
     el.symbolQuickPick.replaceChildren();
-    const showQuickPick = state.platform === "bybit-cfd";
+    const showQuickPick = ["bybit-cfd", "exness"].includes(state.platform);
     el.symbolQuickPick.hidden = !showQuickPick;
     if (showQuickPick) {
       state.markets.forEach((market) => {
@@ -964,6 +970,10 @@
     const raw = String(input || "").trim().toUpperCase();
     if (!raw) return null;
     const candidates = [raw];
+    if (state.platform === "exness") {
+      if (["BTC", "ETH", "XAU", "XAG"].includes(raw)) candidates.push(`${raw}USD`);
+      if (["纳指", "NASDAQ", "NAS100", "US100"].includes(raw)) candidates.push("USTEC");
+    }
     if (state.platform === "binance" && !raw.endsWith("USDT")) candidates.push(`${raw}USDT`);
     if (state.platform === "hl-xyz" && !raw.startsWith("XYZ:")) candidates.push(`XYZ:${raw}`);
     if (state.platform === "bybit-cfd" && raw === "XAU") candidates.push("XAUUSD+");
@@ -1003,6 +1013,13 @@
     state.feeManual = false;
     state.makerFeeManual = false;
     state.fixedCommissionManual = false;
+    if (state.platform === "exness") {
+      updateModeUi();
+      exnessView.resetMarket();
+      el.symbolQuickPick.querySelectorAll("button").forEach(button => button.classList.toggle("active", button.dataset.marketId === market.id));
+      savePreferences();
+      return;
+    }
     applyAutoFee();
     if (preservedFees?.taker != null) {
       state.feeManual = true;
@@ -1027,6 +1044,7 @@
   }
 
   function applyAutoFee() {
+    if (state.platform === "exness") return;
     if (!state.market) return;
     let fee;
     if (state.platform === "binance") {
@@ -1125,6 +1143,7 @@
   }
 
   function updateContext() {
+    if (state.platform === "exness") { exnessView.render(); return; }
     el.contextPlatform.textContent = platformLabel();
     el.contextSymbol.textContent = state.market?.id || "选择标的";
     if (!state.market) return;
@@ -1379,6 +1398,7 @@
   }
 
   async function refreshBook(manual = false) {
+    if (state.platform === "exness") { exnessView.render(); return; }
     if (!state.market || (!state.liveEnabled && !manual) || (document.hidden && !manual)) return;
     if (state.inFlight) return state.inFlight;
     let inputs;
@@ -1450,13 +1470,14 @@
 
   function scheduleNext() {
     window.clearTimeout(state.timer);
-    if (!state.liveEnabled || document.hidden) return;
+    if (state.platform === "exness" || !state.liveEnabled || document.hidden) return;
     const base = Number(el.sampleInterval.value) || 3000;
     const delay = state.errorCount ? Math.min(30_000, base * 2 ** Math.min(4, state.errorCount)) : base;
     state.timer = window.setTimeout(() => void refreshBook(false), delay);
   }
 
   function recomputeFromLastBook() {
+    if (state.platform === "exness") { exnessView.render(); return; }
     resetSamples();
     if (!state.lastBook || state.lastBookMarketId !== state.market?.id) {
       renderEmpty();
@@ -1676,6 +1697,7 @@
   }
 
   function render() {
+    if (state.platform === "exness") { exnessView.render(); return; }
     renderStats();
     renderSparkline();
     const sample = selectedSample();
@@ -1805,11 +1827,16 @@
 
   function updateModeUi() {
     const isBybit = state.platform === "bybit-cfd";
-    const limitUnsupported = isBybit;
+    const isExness = state.platform === "exness";
+    document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
+    document.getElementById("controlIntro").textContent = isExness
+      ? "风险不含摩擦。输入账户买卖价，估算一次完整进出的成本。"
+      : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
+    const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');
     if (limitButton) {
       limitButton.disabled = limitUnsupported;
-      limitButton.title = isBybit
+      limitButton.title = isExness ? "Exness差价合约限价不是Post-only免点差成交，本模式只算市价往返" : isBybit
         ? "Bybit CFD首版只提供全市价成本；限价成交不是Post-only撮合模型"
         : "";
     }
@@ -1832,6 +1859,23 @@
       : isLimit
       ? "条件：Post-only挂单全额成交，进场机械滑点为0；止损成本仅以当前盘口形状做代理。"
       : "双腿均按吃单费率，并计入当前盘口冲击。";
+    document.getElementById("midLabel").textContent = isExness ? "手动报价中间价" : "盘口中间价";
+    document.getElementById("totalLossLabel").textContent = isExness ? "止损情景总亏" : "止损命中总亏";
+    document.getElementById("exnessInputs").hidden = !isExness;
+    document.getElementById("exnessBreakdown").hidden = !isExness;
+    document.querySelector(".stat-tabs").hidden = isExness;
+    document.querySelector(".rolling").hidden = isExness;
+    document.querySelector(".execution").hidden = isExness;
+    document.querySelector(".subtle-row").hidden = isExness;
+    if (isExness) {
+      window.clearTimeout(state.timer);
+      el.takerFeeBlock.hidden = true; el.fixedCommissionBlock.hidden = true;
+      el.methodBlock.hidden = true; el.intervalBlock.hidden = true;
+      el.windowBlock.parentElement.hidden = true; el.toggleLive.hidden = true;
+      el.refreshNow.textContent = "重新计算";
+      el.executionNote.textContent = "按一次完整买卖价差＋两边佣金＋手动滑点−手动返佣计算。无公开深度，无法判断大单成交成本。";
+      el.intervalBlock.parentElement.classList.add("single-column");
+    }
     if (isLimit && state.lastBook) updateAutoLimitPrice(state.lastBook);
     updateActiveButtons();
   }
@@ -1857,6 +1901,17 @@
   }
 
   async function copySummary() {
+    if (state.platform === "exness") {
+      const text = exnessView.summary();
+      if (!text) return;
+      try {
+        if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+        else if (!copyFallback(text)) throw new Error("copy failed");
+        el.copySummary.textContent = "已复制情景";
+        window.setTimeout(() => { el.copySummary.textContent = "复制结果"; }, 1300);
+      } catch { setMessage("复制失败，请手动记录结果。", "error"); }
+      return;
+    }
     const sample = selectedSample();
     if (!sample || !state.market) return;
     if (state.bookStale) {
@@ -1987,8 +2042,8 @@
 
   document.querySelectorAll("[data-execution]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (state.platform === "bybit-cfd" && button.dataset.execution === "limit") {
-        setMessage("Bybit CFD不是Post-only撮合盘口；为避免伪造Maker成交，本版仅开放全市价估算。", "warning");
+      if (["bybit-cfd", "exness"].includes(state.platform) && button.dataset.execution === "limit") {
+        setMessage("差价合约限价不等于Post-only成交，本模式仅开放市价往返估算。", "warning");
         return;
       }
       state.execution = button.dataset.execution;
@@ -2068,6 +2123,7 @@
 
   el.copySummary.addEventListener("click", copySummary);
   document.addEventListener("visibilitychange", () => {
+    if (state.platform === "exness") { exnessView.render(); return; }
     if (document.hidden) {
       window.clearTimeout(state.timer);
       if (state.platform === "bybit-cfd") {
@@ -2101,7 +2157,7 @@
     if (
       state.liveEnabled &&
       !document.hidden &&
-      state.platform !== "bybit-cfd" &&
+      !["bybit-cfd", "exness"].includes(state.platform) &&
       Date.now() - (state.metadataFetchedAt || 0) > METADATA_SOFT_TTL
     ) {
       void refreshMarketsMetadata();

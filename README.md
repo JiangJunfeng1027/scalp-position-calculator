@@ -51,6 +51,21 @@
 | 币安 U 本位 | Futures 公共接口 | 普通用户费率、BNB开关、手动覆盖 | 1000档原始盘口；超深度或市价保护边界即阻断 |
 | Hyperliquid 主市场 / XYZ | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
 | Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手，仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ 的LP指示性深度 |
+| Exness | 手动填写账户买入价、卖出价 | Standard / Pro / Raw Spread / Zero，每手往返佣金＋手动返佣 | BTCUSD / ETHUSD / XAUUSD / XAGUSD / USTEC；无实时深度，不判断成交容量 |
+
+### Exness：手动报价情景
+
+选择 Exness、标的及账户类型，填入同一时刻的卖出价（Bid）与买入价（Ask）。风险与止损仍沿用主页面。结果会显示手数、名义仓位、返佣前/后成本、成本占风险及情景总亏。
+
+- 2026-09-23 核验官方资料：BTC/ETH每手1币，黄金100盎司，白银5000盎司，普通USTEC每手1美元/点。**不含美分账户、USTEC_x100或XAUUSD247。**
+- 佣金输入统一为每手完整往返：Raw五个标的依次为4 / 0.5 / 7 / 7 / 0.625美元；Zero依次为8.75 / 1 / 11 / 100 / 1.25美元；Standard和Pro默认0。来源的单边佣金在这里已乘2，实际账户可覆盖。
+- 完整买卖价差只算一次：`(Ask − Bid) × 手数 × 合约乘数`。额外往返滑点填进出两腿合计的**报价单位**，再乘实际数量；填0不代表实际零滑点。
+- 返佣默认0，只填实际返给用户的每手完整往返金额。手动填写的返佣始终标作假设，不能把博主分成比例直接当总成本折扣。超过点差与佣金合计的返佣会阻断。
+- 按数量步进向下取整；ETH最小0.1手、普通USTEC最小0.05手。默认步进0.01手需对照终端，支持修改。白银和USTEC默认用较低夜间上限20/200手；实际时段/账户规格可手动覆盖。超限拒算，不静默截仓。
+- 账户与费用参数按账户类型＋标的本地保存；报价不保存，切换账户/标的或重开页面必须重新输入。页面和复制结果均明确标记“手动情景”，不生成虚假的滚动中位、最差盘口或容量结论。
+- 官方API当次仅在越南地区开放、需认证密钥且暂不支持指数，因此本次没有接入账户或自动实时行情。未计隔夜费、未来跳空及实际成交滑点，美元按1:1显示为U。
+
+规则来源：[加密货币](https://get.exness.help/hc/en-us/articles/17854191888540-Cryptocurrencies)、[贵金属](https://get.exness.help/hc/en-us/articles/17854173039388-Commodities)、[指数](https://get.exness.help/hc/en-us/articles/17854383867548-Indices)、[API限制](https://get.exness.help/hc/en-us/articles/27866287512476-Exness-API)。
 
 ### Bybit 黄金、白银与外汇特别说明
 
@@ -108,6 +123,7 @@ python3 -m http.server 8765 --directory .
 
 ```bash
 node tests/cost-core.test.js
+node tests/exness-core.test.js
 ```
 
 ## 主要规则来源

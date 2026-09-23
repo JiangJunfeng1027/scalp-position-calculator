@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=16" />
+    <link rel="stylesheet" href="./cost.css?v=17" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -28,7 +28,7 @@
           <img class="brand-icon" src="./favicon-v5.svg" alt="" aria-hidden="true" />
           <div>
             <div class="eyebrow">EXECUTION FRICTION</div>
-            <h1>实时成本估算</h1>
+            <h1 id="pageHeading">实时成本估算</h1>
           </div>
         </div>
         <div class="live-state" id="liveState" data-state="loading">
@@ -41,7 +41,7 @@
       <div class="workspace">
         <aside class="controls" aria-label="估算参数">
           <div class="control-intro">
-            <p>风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。</p>
+            <p id="controlIntro">风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。</p>
           </div>
 
           <div class="control-block">
@@ -51,6 +51,7 @@
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
               <option value="bybit-cfd">Bybit CFD（紧点差账户）</option>
+              <option value="exness">Exness（手动报价估算）</option>
             </select>
           </div>
 
@@ -70,6 +71,56 @@
             <div class="symbol-quick-pick" id="symbolQuickPick" hidden></div>
             <div class="field-note" id="productNote">正在读取可交易合约…</div>
           </div>
+
+          <section id="exnessInputs" class="exness-inputs" hidden aria-label="Exness报价与费用">
+            <div class="control-block">
+              <label for="exAccount">Exness账户类型</label>
+              <select id="exAccount">
+                <option value="raw">Raw Spread 裸点</option>
+                <option value="pro">Pro 先锋</option>
+                <option value="standard">Standard 标准</option>
+                <option value="zero">Zero 零点</option>
+              </select>
+              <p class="field-note warning-note">手动报价，非实时。请使用所选账户的同一时刻报价；不同账户的点差不能混用。</p>
+            </div>
+            <div class="input-pair">
+              <div class="control-block">
+                <label for="exBid">卖出价（Bid）</label>
+                <div class="number-field"><input id="exBid" inputmode="decimal" placeholder="终端卖出价" /><span>USD</span></div>
+              </div>
+              <div class="control-block">
+                <label for="exAsk">买入价（Ask）</label>
+                <div class="number-field"><input id="exAsk" inputmode="decimal" placeholder="终端买入价" /><span>USD</span></div>
+              </div>
+            </div>
+            <p class="field-note" id="exQuoteTime"></p>
+            <div class="control-block">
+              <div class="label-row"><label for="exCommission">每手往返佣金</label><button id="exReset" type="button" class="text-button">恢复官方值</button></div>
+              <div class="number-field"><input id="exCommission" inputmode="decimal" /><span>U/手</span></div>
+              <div class="field-note">开仓＋平仓的合计佣金，已乘2；不要再翻倍。</div>
+            </div>
+            <div class="input-pair">
+              <div class="control-block">
+                <label for="exRebate">每手往返返佣</label>
+                <div class="number-field"><input id="exRebate" inputmode="decimal" value="0" /><span>U/手</span></div>
+              </div>
+              <div class="control-block">
+                <label for="exSlippage">额外往返滑点</label>
+                <div class="number-field"><input id="exSlippage" inputmode="decimal" value="0" /><span>价差</span></div>
+              </div>
+            </div>
+            <p class="field-note">返佣填实际返给你的完整一手金额，不填博主分成百分比。滑点填进出两腿合计的额外报价偏差，0仅代表未计入。</p>
+            <details class="exness-specs">
+              <summary>合约规格与来源</summary>
+              <p class="field-note" id="exSpec"></p>
+              <div class="input-pair">
+                <div class="control-block"><label for="exStep">手数步进</label><div class="number-field"><input id="exStep" inputmode="decimal" /><span>手</span></div></div>
+                <div class="control-block"><label for="exMaxLots">单笔手数上限</label><div class="number-field"><input id="exMaxLots" inputmode="decimal" /><span>手</span></div></div>
+              </div>
+              <p class="field-note">仅普通美元报价合约，不含美分账户与 USTEC_x100。美元按1:1显示为U。</p>
+              <p class="field-note exness-sources"><a href="https://get.exness.help/hc/en-us/articles/17854191888540-Cryptocurrencies" target="_blank" rel="noopener noreferrer">加密货币规格</a> · <a href="https://get.exness.help/hc/en-us/articles/17854173039388-Commodities" target="_blank" rel="noopener noreferrer">贵金属规格</a> · <a href="https://get.exness.help/hc/en-us/articles/17854383867548-Indices" target="_blank" rel="noopener noreferrer">指数规格</a> · <a href="https://get.exness.help/hc/en-us/articles/27866287512476-Exness-API" target="_blank" rel="noopener noreferrer">报价接口限制</a></p>
+            </details>
+          </section>
 
           <div class="control-block">
             <label>进出方式</label>
@@ -189,7 +240,7 @@
           </div>
 
           <p class="scope-note">
-            只读公共行情，不连接账户、不会下单。Hyperliquid聚合深度是近似值；Bybit为LP指示性深度。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
+            只读公共行情或手动输入，不连接账户、不会下单。Exness为手动报价情景；Hyperliquid聚合深度是近似值；Bybit为LP指示性深度。未计资金费、隔夜费、触发延迟、未来跳空与清算影响。
           </p>
         </aside>
 
@@ -238,12 +289,12 @@
               <small id="costRateValue">总成本率 --</small>
             </div>
             <div>
-              <span>止损命中总亏</span>
+              <span id="totalLossLabel">止损命中总亏</span>
               <strong id="totalLossValue">-- U</strong>
               <small id="actualRiskValue">价格风险 --</small>
             </div>
             <div>
-              <span>盘口中间价</span>
+              <span id="midLabel">盘口中间价</span>
               <strong id="midValue">--</strong>
               <small id="spreadValue">价差 --</small>
             </div>
@@ -275,6 +326,10 @@
             <div class="breakdown-row subtle-row">
               <span>市买不利滑点</span><em id="buySlipValue">--</em>
               <span>市卖不利滑点</span><em id="sellSlipValue">--</em>
+            </div>
+            <div id="exnessBreakdown" hidden>
+              <div class="breakdown-row exness-extra"><span>手动返佣假设</span><b id="exRebateValue">--</b></div>
+              <div class="breakdown-row exness-extra"><span>手动额外滑点</span><b id="exSlipValue">--</b></div>
             </div>
           </section>
 
@@ -319,12 +374,14 @@
       </div>
 
       <footer class="footer">
-        <span>币安公开Futures API · Hyperliquid公开Info API · Bybit官网TradFi WebSocket</span>
-        <span>默认费率核验日：2026-08-10 · 实际账户费率可手动覆盖</span>
+        <span>币安公开Futures API · Hyperliquid公开Info API · Bybit官网TradFi WebSocket · Exness手动报价</span>
+        <span>公开盘口费率核验：2026-08-10 · Exness规格：2026-09-23 · 实际账户费率可手动覆盖</span>
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=16"></script>
-    <script src="./cost.js?v=16"></script>
+    <script src="./cost-core.js?v=17"></script>
+    <script src="./exness-core.js?v=17"></script>
+    <script src="./exness-ui.js?v=17"></script>
+    <script src="./cost.js?v=17"></script>
   </body>
 </html>

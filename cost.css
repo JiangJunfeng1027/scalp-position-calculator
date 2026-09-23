@@ -1113,3 +1113,10 @@ select {
     transition-duration: 1ms !important;
   }
 }
+.exness-inputs { padding: 14px; border: 1px solid #675737; border-radius: 12px; background: rgba(200, 169, 106, 0.035); }
+.exness-inputs .input-pair { gap: 10px; }
+.exness-inputs .number-field input { min-width: 0; }
+.exness-specs { margin-top: 12px; }
+.exness-specs summary { cursor: pointer; color: #c8a96a; font-size: 13px; }
+.exness-sources a { color: #c8a96a; }
+.exness-extra { grid-template-columns: 1fr auto; }
