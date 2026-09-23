@@ -55,5 +55,35 @@
       gross, cost, priceRisk, risk, totalLoss: priceRisk + cost, riskPercent: cost / risk * 100,
       grossRiskPercent: gross / risk * 100, costBp: cost / notional * 10000 };
   }
-  return { checkedAt, accounts, markets, commission, estimate };
+  // Historical discussion scenarios, NOT current quotes or verified account rebates.
+  // At BTC 80,000 and gold 4,000 USD, per-100,000 USD gross costs were:
+  // Raw 8.4375 / 4 USD; Pro 8.75 / 4.55 USD; Standard 12.5 / 6.5 USD.
+  // No baseline is invented for the other instruments or Zero accounts.
+  const referenceBp = {
+    raw: { BTCUSD: 0.84375, XAUUSD: 0.4 },
+    pro: { BTCUSD: 0.875, XAUUSD: 0.455 },
+    standard: { BTCUSD: 1.25, XAUUSD: 0.65 },
+    zero: {},
+  };
+  function estimateRatio(c) {
+    const read = (key, label) => {
+      const raw = c[key];
+      if (raw == null || String(raw).trim() === "") throw new Error(`请先确认${label}`);
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) throw new Error(`${label}须为不小于0的数字`);
+      return value;
+    };
+    const stopPercent = read("stopPercent", "止损距离");
+    if (stopPercent <= 0 || stopPercent >= 100) throw new Error("止损距离须大于0且小于100%");
+    const baseBp = read("baseBp", "完整往返成本率"), slipBp = read("slipBp", "额外滑点率"), rebateBp = read("rebateBp", "返佣率");
+    const redline = read("redline", "成本红线");
+    if (redline <= 0 || redline > 10) throw new Error("成本红线须大于0且不高于10%R");
+    if (rebateBp > baseBp) throw new Error("返佣率不能超过参考往返成本率");
+    const netBp = baseBp + slipBp - rebateBp;
+    const riskPercent = netBp / stopPercent;
+    return { stopPercent, baseBp, slipBp, rebateBp, netBp, riskPercent,
+      costPer100k: netBp * 10, costPer100Risk: riskPercent,
+      totalLossR: 1 + riskPercent / 100, minStopPercent: netBp / redline, redline };
+  }
+  return { checkedAt, accounts, markets, commission, estimate, referenceBp, estimateRatio };
 });

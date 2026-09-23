@@ -40,3 +40,22 @@ for (let risk = 37; risk < 999; risk += 17) {
   assert.ok(r.priceRisk <= risk + 1e-8);
 }
 console.log("Exness cost tests passed (5 symbols, account commissions, rounding, invalid inputs).");
+
+// Ratio mode cancels position/risk size: bp / stop-percent = percent of R.
+const ratioBase = { baseBp: 0.4, stopPercent: 0.2, slipBp: 0, rebateBp: 0, redline: 5 };
+const ratio = core.estimateRatio(ratioBase);
+near(ratio.riskPercent, 2); near(ratio.totalLossR, 1.02);
+near(ratio.costPer100Risk, 2); near(ratio.costPer100k, 4); near(ratio.minStopPercent, 0.08);
+near(core.estimateRatio({ ...ratioBase, baseBp: 1 }).riskPercent, 5);
+near(core.estimateRatio({ ...ratioBase, stopPercent: 0.4 }).riskPercent, 1);
+near(core.estimateRatio({ ...ratioBase, slipBp: 0.1, rebateBp: 0.05 }).riskPercent, 2.25);
+near(core.estimateRatio({ ...ratioBase, baseBp: 0 }).riskPercent, 0);
+assert.throws(() => core.estimateRatio({ ...ratioBase, rebateBp: 0.5 }), /返佣/);
+for (const key of Object.keys(ratioBase)) {
+  for (const value of ["", null, -1, NaN, Infinity]) assert.throws(() => core.estimateRatio({ ...ratioBase, [key]: value }));
+}
+for (const stopPercent of [0, 100, 200]) assert.throws(() => core.estimateRatio({ ...ratioBase, stopPercent }));
+assert.equal(core.referenceBp.raw.ETHUSD, undefined);
+assert.equal(core.referenceBp.raw.XAGUSD, undefined);
+assert.equal(core.referenceBp.raw.USTEC, undefined);
+console.log("Exness ratio tests passed (unit conversion, redline, unknown baselines, invalid inputs).");
