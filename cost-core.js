@@ -7,6 +7,10 @@
 
   const BP = 10_000;
 
+  function costRiskZone(value, redline = 5) {
+    return value > 10 ? "bad" : value <= Math.min(redline, 10) ? "good" : "warn";
+  }
+
   function asPositive(value, name) {
     const number = Number(value);
     if (!Number.isFinite(number) || number <= 0) {
@@ -763,6 +767,7 @@
 
   return {
     BP,
+    costRiskZone,
     decimalPlaces,
     floorToStep,
     isStepAligned,

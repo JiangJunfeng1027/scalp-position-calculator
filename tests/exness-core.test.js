@@ -41,10 +41,14 @@ for (let risk = 37; risk < 999; risk += 17) {
 }
 console.log("Exness cost tests passed (5 symbols, account commissions, rounding, invalid inputs).");
 
-// Ratio mode cancels position/risk size: bp / stop-percent = percent of R.
-const ratioBase = { baseBp: 0.4, stopPercent: 0.2, slipBp: 0, rebateBp: 0, redline: 5 };
+// Budget scales money values while bp / stop-percent stays percent of R.
+const ratioBase = { risk: 200, baseBp: 0.4, stopPercent: 0.2, slipBp: 0, rebateBp: 0, redline: 5 };
 const ratio = core.estimateRatio(ratioBase);
 near(ratio.riskPercent, 2); near(ratio.totalLossR, 1.02);
+near(ratio.notional, 100000); near(ratio.cost, 4); near(ratio.totalLoss, 204);
+const largerBudget = core.estimateRatio({ ...ratioBase, risk: 500 });
+near(largerBudget.notional, 250000); near(largerBudget.cost, 10); near(largerBudget.totalLoss, 510);
+near(largerBudget.riskPercent, ratio.riskPercent);
 near(ratio.costPer100Risk, 2); near(ratio.costPer100k, 4); near(ratio.minStopPercent, 0.08);
 near(core.estimateRatio({ ...ratioBase, baseBp: 1 }).riskPercent, 5);
 near(core.estimateRatio({ ...ratioBase, stopPercent: 0.4 }).riskPercent, 1);
@@ -55,7 +59,10 @@ for (const key of Object.keys(ratioBase)) {
   for (const value of ["", null, -1, NaN, Infinity]) assert.throws(() => core.estimateRatio({ ...ratioBase, [key]: value }));
 }
 for (const stopPercent of [0, 100, 200]) assert.throws(() => core.estimateRatio({ ...ratioBase, stopPercent }));
+assert.throws(() => core.estimateRatio({ ...ratioBase, risk: 0 }), /风险预算/);
+assert.throws(() => core.estimateRatio({ ...ratioBase, risk: Number.MAX_VALUE }), /数值过大/);
+assert.throws(() => core.estimateRatio({ ...ratioBase, stopPercent: Number.MIN_VALUE }), /止损距离过小/);
 assert.equal(core.referenceBp.raw.ETHUSD, undefined);
 assert.equal(core.referenceBp.raw.XAGUSD, undefined);
 assert.equal(core.referenceBp.raw.USTEC, undefined);
-console.log("Exness ratio tests passed (unit conversion, redline, unknown baselines, invalid inputs).");
+console.log("Exness ratio tests passed (risk budget, money values, units, redline, unknown baselines, invalid inputs).");

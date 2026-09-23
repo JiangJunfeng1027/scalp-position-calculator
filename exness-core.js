@@ -75,13 +75,19 @@
     };
     const stopPercent = read("stopPercent", "止损距离");
     if (stopPercent <= 0 || stopPercent >= 100) throw new Error("止损距离须大于0且小于100%");
+    const risk = read("risk", "风险预算");
+    if (risk <= 0) throw new Error("风险预算须大于0");
     const baseBp = read("baseBp", "完整往返成本率"), slipBp = read("slipBp", "额外滑点率"), rebateBp = read("rebateBp", "返佣率");
     const redline = read("redline", "成本红线");
     if (redline <= 0 || redline > 10) throw new Error("成本红线须大于0且不高于10%R");
     if (rebateBp > baseBp) throw new Error("返佣率不能超过参考往返成本率");
     const netBp = baseBp + slipBp - rebateBp;
     const riskPercent = netBp / stopPercent;
-    return { stopPercent, baseBp, slipBp, rebateBp, netBp, riskPercent,
+    const notional = risk / (stopPercent / 100);
+    const cost = risk * riskPercent / 100;
+    const totalLoss = risk + cost;
+    if (![notional, cost, totalLoss, riskPercent].every(Number.isFinite)) throw new Error("输入数值过大或止损距离过小，请调整");
+    return { stopPercent, risk, notional, cost, totalLoss, baseBp, slipBp, rebateBp, netBp, riskPercent,
       costPer100k: netBp * 10, costPer100Risk: riskPercent,
       totalLossR: 1 + riskPercent / 100, minStopPercent: netBp / redline, redline };
   }

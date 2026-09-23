@@ -235,7 +235,7 @@
     lastSourceTime: null,
   };
 
-  const exnessView = window.createExnessView({ el, state, format, renderEmpty, setLiveState, setMessage });
+  const exnessView = window.createExnessView({ el, state, format, numberValue, renderEmpty, setLiveState, setMessage });
 
   function usesFixedCommission(platform = state.platform) {
     return platform === "bybit-cfd";
@@ -349,9 +349,9 @@
         el.platform.value = saved.platform;
       }
       if (saved.symbol) el.symbol.value = saved.symbol;
-      if (Number(saved.stopPercent) > 0) el.stopPercent.value = saved.stopPercent;
-      if (Number(saved.risk) > 0) el.risk.value = saved.risk;
-      if (Number(saved.redline) > 0) el.redline.value = saved.redline;
+      if (numberValue({ value: saved.stopPercent }) > 0) el.stopPercent.value = saved.stopPercent;
+      if (numberValue({ value: saved.risk }) > 0) el.risk.value = saved.risk;
+      if (numberValue({ value: saved.redline }) > 0) el.redline.value = saved.redline;
       if (["2000", "3000", "5000"].includes(saved.interval)) el.sampleInterval.value = saved.interval;
       if (["20", "60", "120"].includes(saved.sampleWindow)) el.sampleWindow.value = saved.sampleWindow;
       if (["auto", "raw"].includes(saved.depthMode)) el.depthMode.value = saved.depthMode;
@@ -1559,7 +1559,7 @@
     const result = sample.result;
     const value = result[resultField()];
     const redline = numberValue(el.redline) || 5;
-    const zone = value > 10 ? "bad" : value <= Math.min(redline, 10) ? "good" : "warn";
+    const zone = core.costRiskZone(value, redline);
     el.heroResult.dataset.zone = zone;
     const labels = { current: "当前成本 / 风险", median: "滚动中位成本 / 风险", worst: "滚动最差成本 / 风险" };
     const methodLabel = state.execution === "limit"
@@ -1571,7 +1571,7 @@
     if (zone === "good") {
       el.heroVerdict.textContent = `通过 ${format(redline, 2)}%R 红线 · 当前规模可接受`;
     } else if (zone === "warn") {
-      el.heroVerdict.textContent = `超过 ${format(redline, 2)}%R 理想线 · 仍低于10%上限`;
+      el.heroVerdict.textContent = `超过 ${format(redline, 2)}%R 理想线 · 不高于10%上限`;
     } else {
       el.heroVerdict.textContent = state.execution === "limit"
         ? "超过10%R · 缩仓或放宽止损"
@@ -1830,7 +1830,7 @@
     const isExness = state.platform === "exness";
     document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
     document.getElementById("controlIntro").textContent = isExness
-      ? "风险不含摩擦。只填止损距离，按参考往返费率计算成本占风险。"
+      ? "风险预算不含摩擦。填写止损距离和风险预算，估算仓位、成本与止损总亏。"
       : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
     const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');
@@ -1866,8 +1866,9 @@
     document.getElementById("exnessMetrics").hidden = !isExness;
     document.querySelectorAll(".breakdown > .breakdown-row").forEach(node => node.hidden = isExness);
     document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "往返成本率 ÷ 止损距离" : "钱消失在哪里";
-    el.risk.closest(".control-block").hidden = isExness;
-    el.stopPercent.closest(".input-pair").classList.toggle("single-column", isExness);
+    el.risk.closest(".control-block").hidden = false;
+    document.querySelector('label[for="risk"]').textContent = isExness ? "风险预算（不含成本）" : "价格风险";
+    el.stopPercent.closest(".input-pair").classList.remove("single-column");
     el.redline.closest(".input-pair").hidden = isExness;
     el.executionNote.closest(".control-block").hidden = isExness;
     el.refreshNow.parentElement.hidden = isExness;

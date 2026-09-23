@@ -499,4 +499,13 @@ assert.throws(
   /盘口交叉或倒挂/,
 );
 
-console.log("cost-core: market and limit-entry checks passed");
+// All venues share ideal-line colors; only values strictly above 10 turn red.
+for (const [value, zone] of [[0, "good"], [2, "good"], [5, "good"], [5.001, "warn"], [10, "warn"], [10.001, "bad"]]) {
+  assert.equal(core.costRiskZone(value, 5), zone, `color at ${value}%R`);
+}
+assert.equal(core.costRiskZone(3, 3), "good");
+assert.equal(core.costRiskZone(4, 3), "warn");
+assert.equal(core.costRiskZone(10, 10), "good");
+assert.equal(core.costRiskZone(10.001, 10), "bad");
+
+console.log("cost-core: market, limit-entry and shared cost-color checks passed");
