@@ -1120,3 +1120,6 @@ select {
 .exness-specs summary { cursor: pointer; color: #c8a96a; font-size: 13px; }
 .exness-sources a { color: #c8a96a; }
 .exness-extra { grid-template-columns: 1fr auto; }
+.exness-scale-note { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.7; }
+.exness-scale-note strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.exness-scale-note p { margin: 5px 0 0; color: var(--muted); }

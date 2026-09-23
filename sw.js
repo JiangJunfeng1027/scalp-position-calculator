@@ -1,13 +1,13 @@
-const CACHE_NAME = "scalp-position-calculator-v19";
+const CACHE_NAME = "scalp-position-calculator-v20";
 const ASSETS = [
   "./",
   "./index.html",
   "./cost.html",
-  "./cost.css?v=19",
-  "./cost-core.js?v=19",
-  "./cost.js?v=19",
-  "./exness-core.js?v=19",
-  "./exness-ui.js?v=19",
+  "./cost.css?v=20",
+  "./cost-core.js?v=20",
+  "./cost.js?v=20",
+  "./exness-core.js?v=20",
+  "./exness-ui.js?v=20",
   "./manifest.webmanifest?v=5",
   "./favicon-v5.ico",
   "./favicon-32-v5.png",

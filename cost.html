@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=19" />
+    <link rel="stylesheet" href="./cost.css?v=20" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -51,7 +51,7 @@
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
               <option value="bybit-cfd">Bybit CFD（紧点差账户）</option>
-              <option value="exness">Exness（止损距离估算）</option>
+              <option value="exness">Exness（固定费率估算）</option>
             </select>
           </div>
 
@@ -233,6 +233,12 @@
             <div class="hero-number"><span id="heroValue">--</span><small>%</small></div>
             <div class="hero-verdict" id="heroVerdict">等待第一帧盘口</div>
 
+            <div id="exScaleNote" class="exness-scale-note" hidden>
+              <strong id="exRiskEquation">--</strong>
+              <p>止损距离、费率不变时，预算和费用等比例变化，所以百分比不变。</p>
+              <p>规模相关滑点未评估，实际总成本占风险未知；颜色仅评价当前固定费率情景。</p>
+            </div>
+
             <div class="risk-track" aria-label="成本风险刻度">
               <div class="risk-fill" id="riskFill"></div>
               <span class="risk-marker marker-five">5%</span>
@@ -277,8 +283,8 @@
 
           <section class="primary-metrics" id="exnessMetrics" aria-label="Exness参考结果" hidden>
             <div><span>估算名义仓位</span><strong id="exPosition">--</strong><small>风险预算÷止损距离，未作手数取整</small></div>
-            <div><span>参考摩擦成本</span><strong id="exCost">--</strong><small id="exNetRate">参考往返成本率 --</small></div>
-            <div><span>含摩擦的止损总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">风险预算＋参考成本</small></div>
+            <div><span>固定费率情景成本</span><strong id="exCost">--</strong><small id="exNetRate">设定往返成本率 --</small></div>
+            <div><span>固定费率情景总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">风险预算＋情景成本</small></div>
             <div><span id="exThresholdLabel">满足5%R红线所需止损</span><strong id="exMinStop">--</strong><small>实际止损须由交易结构决定</small></div>
           </section>
 
@@ -358,9 +364,9 @@
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=19"></script>
-    <script src="./exness-core.js?v=19"></script>
-    <script src="./exness-ui.js?v=19"></script>
-    <script src="./cost.js?v=19"></script>
+    <script src="./cost-core.js?v=20"></script>
+    <script src="./exness-core.js?v=20"></script>
+    <script src="./exness-ui.js?v=20"></script>
+    <script src="./cost.js?v=20"></script>
   </body>
 </html>

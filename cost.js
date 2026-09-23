@@ -1830,7 +1830,7 @@
     const isExness = state.platform === "exness";
     document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
     document.getElementById("controlIntro").textContent = isExness
-      ? "风险预算不含摩擦。填写止损距离和风险预算，估算仓位、成本与止损总亏。"
+      ? "风险预算不含摩擦。按固定费率估算：预算决定仓位和成本金额，止损距离与费率决定成本比例。"
       : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
     const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');
@@ -1864,8 +1864,9 @@
     document.getElementById("exnessInputs").hidden = !isExness;
     document.getElementById("marketMetrics").hidden = isExness;
     document.getElementById("exnessMetrics").hidden = !isExness;
+    document.getElementById("exScaleNote").hidden = true;
     document.querySelectorAll(".breakdown > .breakdown-row").forEach(node => node.hidden = isExness);
-    document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "往返成本率 ÷ 止损距离" : "钱消失在哪里";
+    document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "固定费率 ÷ 止损距离" : "钱消失在哪里";
     el.risk.closest(".control-block").hidden = false;
     document.querySelector('label[for="risk"]').textContent = isExness ? "风险预算（不含成本）" : "价格风险";
     el.stopPercent.closest(".input-pair").classList.remove("single-column");
