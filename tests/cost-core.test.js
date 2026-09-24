@@ -534,6 +534,20 @@ assert.throws(
   /盘口交叉或倒挂/,
 );
 
+// WTI CFD uses 1,000 barrels/lot and a single 3U complete-trade commission.
+const wtiConfig = {
+  bids: [[79.99, 100]], asks: [[80.01, 100]], stopPercent: 0.2, risk: 200,
+  takerRate: 0, fixedRoundTripCommissionPerQuantity: 3, contractMultiplier: 1000,
+  quantityStep: "0.01", minQuantity: 0.01, maxQuantity: 20,
+};
+const wti = core.estimate(wtiConfig);
+assert.equal(wti.status, "ok");
+close(wti.quantity, 1.25); close(wti.actualNotional, 100000);
+close(wti.fixedCommissionCost, 3.75); close(wti.spreadCost, 25);
+close(wti.conservativeCost, 28.75); close(wti.directionalCost, 28.75);
+assert.equal(core.estimate({ ...wtiConfig, risk: 4000 }).status, "above_market_max");
+assert.equal(core.estimate({ ...wtiConfig, risk: 1 }).status, "below_min_quantity");
+
 // All venues share ideal-line colors; only values strictly above 10 turn red.
 for (const [value, zone] of [[0, "good"], [2, "good"], [5, "good"], [5.001, "warn"], [10, "warn"], [10.001, "bad"]]) {
   assert.equal(core.costRiskZone(value, 5), zone, `color at ${value}%R`);
@@ -542,5 +556,7 @@ assert.equal(core.costRiskZone(3, 3), "good");
 assert.equal(core.costRiskZone(4, 3), "warn");
 assert.equal(core.costRiskZone(10, 10), "good");
 assert.equal(core.costRiskZone(10.001, 10), "bad");
+assert.equal(core.costRiskZone(5.000000000002558), "good");
+assert.equal(core.costRiskZone(10.000000000005116), "warn");
 
 console.log("cost-core: market, limit-entry and shared cost-color checks passed");

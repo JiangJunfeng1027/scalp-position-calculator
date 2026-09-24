@@ -21,6 +21,7 @@
     XAUUSD: { venue: "bybit", symbol: "XAUUSD+", multiplier: 100, label: "Bybit XAUUSD+" },
     XAGUSD: { venue: "bybit", symbol: "XAGUSD", multiplier: 5000, label: "Bybit XAGUSD" },
     USTEC: { venue: "bybit", symbol: "NAS100", multiplier: 1, label: "Bybit NAS100" },
+    USOIL: { venue: "bybit", symbol: "USOUSD", multiplier: 1000, label: "Bybit USOUSD（WTI原油）" },
   };
   const BYBIT_CFD_MARKETS = [
     {
@@ -90,6 +91,26 @@
       marginTiers: [[10_000_000, 0.002], [25_000_000, 0.003], [50_000_000, 0.01], [100_000_000, 0.02], [Infinity, 0.05]],
       fixedRoundTripCommissionPerQuantity: 6,
       sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Forex" },
+    },
+    {
+      id: "USOUSD",
+      bookSymbol: "USOUSD",
+      display: "USOUSD · WTI原油（CL）",
+      quickLabel: "CL · 原油",
+      productName: "WTI原油CFD（CL）",
+      contractMultiplier: 1000,
+      quantityStep: "0.01",
+      minQuantity: 0.01,
+      maxQuantity: 20,
+      minNotional: 0,
+      maxNotional: Infinity,
+      priceTick: "0.001",
+      leverage: 500,
+      // Public guest specs expose the base rate, not dynamic margin tiers.
+      baseMarginRate: 0.002,
+      fixedRoundTripCommissionPerQuantity: 3,
+      checkedAt: "2026-09-24",
+      sourceMeta: { product: "Bybit Tight-Spread CFD", symbolGroup: "Commodities" },
     },
   ];
   const DEFAULT_MAX_SAMPLES = 60;
@@ -747,6 +768,7 @@
       marketTakeBound: market.marketTakeBound,
       contractMultiplier: market.contractMultiplier,
       leverage: market.leverage,
+      baseMarginRate: market.baseMarginRate,
       fixedRoundTripCommissionPerQuantity: market.fixedRoundTripCommissionPerQuantity,
       contractType: market.sourceMeta?.contractType,
       underlyingType: market.sourceMeta?.underlyingType,
@@ -971,7 +993,7 @@
       state.markets.forEach((market) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = market.id.replace(/\+$/, "");
+        button.textContent = market.quickLabel || market.id.replace(/\+$/, "");
         button.dataset.marketId = market.id;
         button.addEventListener("click", () => selectMarket(market));
         el.symbolQuickPick.appendChild(button);
@@ -983,6 +1005,9 @@
     const raw = String(input || "").trim().toUpperCase();
     if (!raw) return null;
     const candidates = [raw];
+    if (["exness", "bybit-cfd"].includes(state.platform) && ["CL", "WTI", "原油", "美原油", "USOIL", "USOUSD"].includes(raw)) {
+      candidates.push(state.platform === "exness" ? "USOIL" : "USOUSD");
+    }
     if (state.platform === "exness") {
       if (["BTC", "ETH", "XAU", "XAG"].includes(raw)) candidates.push(`${raw}USD`);
       if (["纳指", "NASDAQ", "NAS100", "US100"].includes(raw)) candidates.push("USTEC");
@@ -1069,7 +1094,7 @@
         makerRate: null,
         fixedRoundTripCommissionPerQuantity: state.market.fixedRoundTripCommissionPerQuantity,
         product: `${state.market.productName} · Tight-Spread`,
-        source: `公开CFD规格 · ${BYBIT_SPEC_CHECKED_AT}`,
+        source: `公开CFD规格 · ${state.market.checkedAt || BYBIT_SPEC_CHECKED_AT}`,
       };
     } else {
       fee = core.inferHyperliquidFees(
@@ -1144,7 +1169,7 @@
     const fixedCommission = numberValue(el.fixedCommission);
     const fixedSource = state.fixedCommissionManual
       ? "手动覆盖"
-      : `Bybit Tight-Spread公开规则 · ${BYBIT_SPEC_CHECKED_AT}`;
+      : `Bybit Tight-Spread公开规则 · ${state.market?.checkedAt || BYBIT_SPEC_CHECKED_AT}`;
     const quantityUnit = "手";
     el.fixedCommissionNote.textContent = Number.isFinite(fixedCommission)
       ? `完整开平交易合计 ${format(fixedCommission, 4)} U/${quantityUnit}，仅计一次 · ${fixedSource}`
@@ -1165,7 +1190,7 @@
     const metadataSuffix = state.metadataSource === "live"
       ? ""
       : state.metadataSource === "bundled-spec"
-        ? ` · 规格核验${BYBIT_SPEC_CHECKED_AT}`
+        ? ` · 规格核验${state.market.checkedAt || BYBIT_SPEC_CHECKED_AT}`
         : " · 元数据来自缓存";
     const depthSuffix = state.platform === "bybit-cfd"
       ? " · LP指示性深度 · 需账户已切换紧点差模式"
@@ -1598,13 +1623,14 @@
     const bookCost = result[bookCostField()];
     const totalLoss = result[totalLossField()];
     el.positionValue.textContent = `${format(result.actualNotional, 2)} U`;
+    const baseMarginOnly = state.platform === "bybit-cfd" && Number.isFinite(state.market?.baseMarginRate);
     const minimumMargin = state.platform === "bybit-cfd"
-      ? progressiveMargin(result.actualNotional, state.market?.marginTiers)
+      ? baseMarginOnly ? result.actualNotional * state.market.baseMarginRate : progressiveMargin(result.actualNotional, state.market?.marginTiers)
       : Number(state.market?.leverage) > 0
         ? result.actualNotional / Number(state.market.leverage)
         : null;
     el.quantityValue.textContent = state.platform === "bybit-cfd"
-      ? `${format(result.quantity, 4)} 手 · 最低保证金≈${format(minimumMargin, 2)}U`
+      ? `${format(result.quantity, 4)} 手 · ${baseMarginOnly ? "基础保证金参考" : "最低保证金"}≈${format(minimumMargin, 2)}U`
       : `数量 ${format(result.quantity, 8)}`;
     el.costValue.textContent = `${format(cost, 2)} U`;
     el.costRateValue.textContent = `总成本率 ${formatBp(result[rateField()])}`;
@@ -1687,7 +1713,9 @@
     if (result.depthApproximate) warnings.push(`${result.depthQuality}，成本为聚合近似`);
     if (result.depthIndicative) {
       warnings.push("Bybit深度是多家流动性提供商的参考值，不是撮合订单簿；实际成交可能不同或部分成交");
-      warnings.push("最低保证金按无既有同品种仓位的分层保证金估算；新闻与收开盘时可能临时降杠杆");
+      warnings.push(Number.isFinite(state.market?.baseMarginRate)
+        ? `原油保证金仅按公开基础比例${format(state.market.baseMarginRate * 100, 2)}%参考，未计动态分层、既有仓位与新闻/收开盘上调，以账户要求为准`
+        : "最低保证金按无既有同品种仓位的分层保证金估算；新闻与收开盘时可能临时降杠杆");
       warnings.push("行情来自Bybit官网当前WebSocket通道，并非承诺稳定的公开V5接口");
     }
     if (result.depthLowPrecision) warnings.push("当前为3位聚合低精度兜底，建议拆单复核");
@@ -1843,7 +1871,7 @@
     const isExness = state.platform === "exness";
     document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
     document.getElementById("controlIntro").textContent = isExness
-      ? "风险预算不含摩擦。按Exness费用与参考盘口逐档估算；BTC/ETH参考币安，金银/纳指参考Bybit。"
+      ? "风险预算不含摩擦。按Exness费用与参考盘口逐档估算；BTC/ETH参考币安，金银/纳指/原油参考Bybit。"
       : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
     const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');

@@ -8,7 +8,10 @@
   const BP = 10_000;
 
   function costRiskZone(value, redline = 5) {
-    return value > 10 ? "bad" : value <= Math.min(redline, 10) ? "good" : "warn";
+    // Decimal price subtraction can put an exact 5/10% boundary a few
+    // trillionths above the line. Ignore only that arithmetic noise.
+    const tolerance = 1e-9;
+    return value > 10 + tolerance ? "bad" : value <= Math.min(redline, 10) + tolerance ? "good" : "warn";
   }
 
   function asPositive(value, name) {

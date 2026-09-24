@@ -50,7 +50,7 @@
 |---|---|---|---|
 | 币安 U 本位 | Futures 公共接口 | 普通用户费率、BNB开关、手动覆盖 | 1000档原始盘口；超深度或市价保护边界即阻断 |
 | Hyperliquid 主市场 / XYZ | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
-| Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手，仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ 的LP指示性深度 |
+| Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手；原油3U/手，均仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ / USOUSD 的LP指示性深度 |
 | Exness | 币安/Bybit实时参考深度 | Exness基础费用＋参考盘口额外冲击，日常填写止损距离＋风险预算 | 用户指定的跨平台近似，非Exness真实盘口 |
 
 ### Exness：止损距离＋风险预算，参考其他平台的深度
@@ -64,6 +64,7 @@
 | XAUUSD | Bybit TradFi XAUUSD+ | 100盎司/手 |
 | XAGUSD | Bybit TradFi XAGUSD | 5000盎司/手 |
 | USTEC | Bybit TradFi NAS100 | 1美元/点/手 |
+| USOIL（CL / WTI原油） | Bybit TradFi USOUSD | 1000桶/手 |
 
 2026-09-23实测Bybit三个频道均返回双边多档，NAS100每侧10档；数量为累计手数，先差分为各档增量，重复累计量产生的零增量档跳过，累计下降则拒绝。乘数同时用原帧美元金额÷价格÷累计手数验证。Bybit深度为流动性提供商的指示性深度，不是保证成交的撮合订单簿。
 
@@ -79,7 +80,7 @@
 ```
 
 - **避免双算费用**：已有完整基础费率时，它已含点差与Exness双边佣金，只叠加参考盘口在买一/卖一以外的额外冲击；不再加参考点差，不收币安/Bybit手续费。
-- **缺基准也能近似**：基础费率留空时，采用参考平台当前点差＋所选Exness账户每手往返佣金。ETH、白银、纳指默认走此模式，页面明确标注点差也来自参考平台。
+- **缺基准也能近似**：基础费率留空时，采用参考平台当前点差＋所选Exness账户每手往返佣金。ETH、白银、纳指、原油默认走此模式，页面明确标注点差也来自参考平台。
 - BTC与黄金保留原历史基础费率，非当前账户实测：Raw为万0.84375/万0.4；Pro为万0.875/万0.455；Standard为万1.25/万0.65（当时BTC80,000美元、黄金4,000美元）。清空基础费率即可改为参考点差＋Exness佣金；旧版按账户/品种保存的费率沿用。
 - Exness每手佣金已按完整往返计算，返佣默认0；手动额外滑点仍为固定万分比，不替代逐档冲击。不要把已有大单冲击再填进基础费率。
 - **比例不是强制上升**：首档承接足够时，不同预算的成本比例仍可能相同；吃到更差档位时才增加。测试固定盘口下200U预算成本4U/2%，500U预算吃后档后成本16.5U/3.3%。此为计算测试，不是实盘报价。
@@ -89,17 +90,25 @@
 
 来源：[币安深度接口](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Order-Book)、[Bybit指示性深度](https://www.bybit.com/en/help-center/article/CFD-Indicative-Liquidity)、Exness[加密货币规格](https://get.exness.help/hc/en-us/articles/17854191888540-Cryptocurrencies)、[贵金属规格](https://get.exness.help/hc/en-us/articles/17854173039388-Commodities)、[指数规格](https://get.exness.help/hc/en-us/articles/17854383867548-Indices)。
 
-### Bybit 黄金、白银与外汇特别说明
+### Bybit 黄金、白银、外汇与原油特别说明
 
 - XAUUSD+ 按 **100 盎司/手**，XAGUSD 按 **5,000 盎司/手**计算；最小与步进均为 0.01 手。
 - EURUSD+ 与 GBPUSD+ 按 **100,000 基础货币单位/手**计算；最小与步进同样为0.01手。
-- 紧点差模式金属、外汇佣金均为**完整开平交易合计 6U/手**，官方说明在开仓时一次扣除，不会再按两条腿乘二。
-- 保证金按公开分层规则估算，并假设没有同品种既有仓位；新闻和收开盘时可能临时降低杠杆。
+- 紧点差模式金属、外汇佣金为**完整开平交易合计6U/手**；WTI原油USOUSD为**完整交易3U/手**，均在开仓时一次扣除，不再乘二。[Bybit官方佣金说明](https://www.bybit.com/en/help-center/article/Bybit-CFD-Fees-Explained)。
+- 金属/外汇保证金按公开分层规则估算，并假设没有同品种既有仓位；原油仅显示公开基础保证金率的参考值。新闻和收开盘时可能临时降低杠杆。
 - Bybit 的 CFD 深度是多家流动性提供商给出的**参考流动性**，不是撮合订单簿，也不保证完全成交。休市、报价过期或深度不够时，页面会拒绝更新并将旧值灰化。
 - 当前适配使用 Bybit 官网正在使用的 TradFi WebSocket，并非承诺稳定的 V5 公共接口；协议改变时可能暂时不可用。
 - 本模型对应 **Tight-Spread 紧点差账户**。请先确认账户已切换到该模式；Zero-Fee 模式的更宽点差不能套用本结果。
 
-USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换算，本版宁可暂缓，也不直接套用美元报价公式。NAS100、SP500等CFD虽然可交易，Bybit目前没有公开多档指示性深度，因此不伪造大单冲击。
+USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换算，本版宁可暂缓，也不直接套用美元报价公式。NAS100于2026-09-23已实测返回多档深度，当前用于Exness USTEC参考；Bybit自有模式暂未加入指数规格。其他标的未核验时不外推深度。
+
+### CL / WTI原油
+
+- 两个平台均可点击“CL · 原油”，也可输入CL、WTI、原油、USOIL或USOUSD。实际产品是WTI原油CFD：Exness代码USOIL，Bybit代码USOUSD，不是CME的CL期货合约。
+- 2026-09-24实测Bybit `mt5.ob_5.USOUSD` 返回双边各10档累计深度，按原帧美元金额÷价格÷累计手数验证为1000桶/手。Exness以等名义金额参考此深度，保持已确认的跨平台近似口径。
+- Exness USOIL同为1000桶/手；Raw每侧3.5美元折为往返7美元/手，Zero每侧6.25折为往返12.5美元/手，Pro/Standard佣金为0。原油没有历史基础费率默认值，采用参考点差＋对应Exness佣金；手动完整费率仍可覆盖。[Exness原油规格](https://get.exness.help/hc/en-us/articles/17854173039388-Commodities)。
+- Bybit访客规格接口核验2026-09-24：USOUSD每手1000桶、最小/步进0.01手、单笔最多20手、价格最小变动0.001美元/桶。基础保证金率0.2%仅作参考，动态分层、既有仓位与新闻/收开盘调整未计入，不冒充保证可用500倍杠杆。[官方公开规格数据](https://www.bybitglobal.com/x-api/fapi/copymt5/public/v1/gdfx/symbol/list-for-guest)。
+- 参考盘口过期或休市时沿用原有清空/禁复制逻辑；不把当前深度当作未来止损保证。
 
 ## 三个数字应该看哪个？
 
