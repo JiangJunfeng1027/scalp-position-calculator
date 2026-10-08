@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=22" />
+    <link rel="stylesheet" href="./cost.css?v=23" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -75,7 +75,7 @@
           <section id="exnessInputs" hidden aria-label="Exness参考费用">
             <p class="field-note warning-note" id="exRateNote"></p>
             <details class="exness-specs">
-              <summary>费用设置（自动记住）</summary>
+              <summary>费用与手数设置（自动记住）</summary>
               <div class="control-block">
                 <label for="exAccount">Exness账户类型</label>
                 <select id="exAccount">
@@ -93,6 +93,11 @@
                 <div class="control-block"><label for="exSlipBp">额外往返滑点</label><div class="number-field"><input id="exSlipBp" inputmode="decimal" value="0" /><span>万分之</span></div></div>
               </div>
               <p class="field-note">这里填占名义仓位的万分比，不填每手金额或伙伴分成比例；返佣默认0。若总费率已含返佣或滑点，不要重复加减。</p>
+              <div class="input-pair">
+                <div class="control-block"><label for="exLotStep">参考取整步进</label><div class="number-field"><input id="exLotStep" inputmode="decimal" value="0.01" /><span>手</span></div></div>
+                <div class="control-block"><label for="exMaxLots">参考单笔上限</label><div class="number-field"><input id="exMaxLots" inputmode="decimal" /><span>手</span></div></div>
+              </div>
+              <p class="field-note">手数向下取整，不超过风险预算。默认0.01手为计算参考，非已核实的交易步进；上限取已知较低时段值。请按自己终端的规格修改，两项按账户和标的记住。</p>
               <p class="field-note" id="exReferenceNote"></p>
             </details>
           </section>
@@ -282,11 +287,16 @@
           </section>
 
           <section class="primary-metrics" id="exnessMetrics" aria-label="Exness参考结果" hidden>
-            <div><span>估算名义仓位</span><strong id="exPosition">--</strong><small>风险预算÷止损距离，未作手数取整</small></div>
+            <div>
+              <div class="exness-lot-heading"><span>Exness参考手数</span><button id="exCopyLots" type="button" class="text-button" disabled>复制手数</button></div>
+              <strong id="exLots">--</strong><small id="exPosition">名义仓位 --</small><small id="exLotNote">按参考步进向下取整</small>
+            </div>
             <div><span>近似摩擦成本</span><strong id="exCost">--</strong><small id="exNetRate">含冲击总成本率 --</small></div>
-            <div><span>近似止损总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">风险预算＋近似成本</small></div>
+            <div><span>近似止损总亏</span><strong id="exTotalLoss">--</strong><small id="exTotalR">实际价格风险＋近似成本</small></div>
             <div><span>参考盘口额外冲击</span><strong id="exImpact">--</strong><small id="exDepthDetails">按较差侧×2</small></div>
           </section>
+
+          <p id="exLotRules" class="field-note exness-lot-rules" hidden></p>
 
           <div class="limit-assumption" id="limitAssumption" hidden>
             <strong>条件结论：挂单已按Post-only全额成交</strong>
@@ -365,9 +375,9 @@
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=22"></script>
-    <script src="./exness-core.js?v=22"></script>
-    <script src="./exness-ui.js?v=22"></script>
-    <script src="./cost.js?v=22"></script>
+    <script src="./cost-core.js?v=23"></script>
+    <script src="./exness-core.js?v=23"></script>
+    <script src="./exness-ui.js?v=23"></script>
+    <script src="./cost.js?v=23"></script>
   </body>
 </html>

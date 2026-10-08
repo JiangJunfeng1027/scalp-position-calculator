@@ -22,6 +22,29 @@
     return ["standard", "pro"].includes(account) ? 0 : market[account];
   }
 
+  // Preserve the decimal values shown to users when checking a lot boundary.
+  // Binary multiplication alone can make an exactly affordable minimum lot
+  // look a fraction over budget (for example 2621.11 * 0.2 / 100).
+  function decimalParts(value) {
+    const [mantissa, exponent = "0"] = Number(value).toString().toLowerCase().split("e");
+    const fractionalDigits = (mantissa.split(".")[1] || "").length;
+    return { coefficient: BigInt(mantissa.replace(".", "")), exponent: Number(exponent) - fractionalDigits };
+  }
+  function decimalProduct(...values) {
+    return values.reduce((product, value) => {
+      const part = typeof value === "object" ? value : decimalParts(value);
+      return { coefficient: product.coefficient * part.coefficient, exponent: product.exponent + part.exponent };
+    }, { coefficient: 1n, exponent: 0 });
+  }
+  function alignDecimals(left, right) {
+    const exponent = Math.min(left.exponent, right.exponent);
+    return [left.coefficient * 10n ** BigInt(left.exponent - exponent),
+      right.coefficient * 10n ** BigInt(right.exponent - exponent)];
+  }
+  function decimalNumber(value) {
+    return Number(`${value.coefficient}e${value.exponent}`);
+  }
+
   function estimate(c) {
     const read = (key, label, positive = false) => {
       if (c[key] === null || c[key] === undefined || String(c[key]).trim() === "") throw new Error(`请填写${label}`);
@@ -119,6 +142,17 @@
     const rebateBp = read("rebateBp", "返佣率");
     const method = c.method ?? "conservative";
     if (!["conservative", "directional"].includes(method)) throw new Error("扫档计算方式无效");
+    // Sizing precision is caller-supplied reference data, not a claim about
+    // the account's live order rules. Omission preserves theoretical sizing.
+    const roundLots = Object.hasOwn(c, "lotStep");
+    const readLotRule = (key, label) => {
+      if (!["number", "string"].includes(typeof c[key])) throw new Error(`${label}须为大于0的数字`);
+      return read(key, label, true);
+    };
+    const lotStep = roundLots ? readLotRule("lotStep", "参考手数精度") : null;
+    const maxLots = Object.hasOwn(c, "maxLots") ? readLotRule("maxLots", "参考单笔手数上限") : market.max;
+    if (maxLots < market.min) throw new Error(`参考单笔手数上限不能小于最小${market.min}手`);
+    if (roundLots && core.decimalPlaces(lotStep) > 12) throw new Error("参考手数精度最多支持12位小数");
     const hasBase = c.baseBp != null && String(c.baseBp).trim() !== "";
     const configuredBaseBp = hasBase ? read("baseBp", "完整往返成本率") : null;
     const normalize = (levels, side) => {
@@ -139,14 +173,59 @@
     const bids = normalize(c.bids, "bid"), asks = normalize(c.asks, "ask");
     const bid = bids[0].price, ask = asks[0].price;
     if (ask < bid) throw new Error("参考盘口买卖价格倒挂，无法估算");
-    const mid = bid / 2 + ask / 2;
-    const notional = risk / (stopPercent / 100);
-    const units = notional / mid;
-    const proxyQuantity = units / proxyMultiplier;
-    const estimatedLots = units / market.multiplier;
-    if (![notional, units, proxyQuantity, estimatedLots].every(value => Number.isFinite(value) && value > 0)) {
+    const bidDecimal = decimalParts(bid), askDecimal = decimalParts(ask);
+    const [bidInteger, askInteger] = alignDecimals(bidDecimal, askDecimal);
+    const exactMid = { coefficient: (bidInteger + askInteger) * 5n,
+      exponent: Math.min(bidDecimal.exponent, askDecimal.exponent) - 1 };
+    const mid = roundLots ? decimalNumber(exactMid) : bid / 2 + ask / 2;
+    const stopFraction = stopPercent / 100;
+    const theoreticalNotional = risk / stopFraction;
+    const theoreticalLots = theoreticalNotional / mid / market.multiplier;
+    if (![theoreticalNotional, theoreticalLots].every(value => Number.isFinite(value) && value > 0)) {
       throw new Error("输入数值过大或止损距离过小，请调整");
     }
+    let estimatedLots = theoreticalLots;
+    if (roundLots) {
+      const scale = 10 ** core.decimalPlaces(lotStep);
+      const stepInt = Math.round(lotStep * scale);
+      if (!Number.isSafeInteger(stepInt) || theoreticalLots * scale > Number.MAX_SAFE_INTEGER) {
+        throw new Error("手数数值过大或参考精度过细，请调整");
+      }
+      const budget = decimalProduct(risk, 100);
+      const riskPerStep = decimalProduct(lotStep, market.multiplier, exactMid, stopPercent);
+      const [budgetInteger, stepRiskInteger] = alignDecimals(budget, riskPerStep);
+      let stepCount = budgetInteger / stepRiskInteger;
+      const lotsForCount = () => decimalNumber(decimalProduct(lotStep, { coefficient: stepCount, exponent: 0 }));
+      estimatedLots = lotsForCount();
+      const exceedsBudget = () => {
+        const [priceRisk, budgetLimit] = alignDecimals(
+          decimalProduct(estimatedLots, market.multiplier, exactMid, stopPercent), budget);
+        return priceRisk > budgetLimit;
+      };
+      // Converting an extremely fine decimal lot quantity back to Number can
+      // itself round upward. Guard that conversion without a budget tolerance.
+      if (exceedsBudget() && stepCount > 0n) {
+        stepCount -= 1n;
+        estimatedLots = lotsForCount();
+      }
+      if (exceedsBudget()) throw new Error("手数取整后风险仍超过预算，请调整参考手数精度");
+      if (!(estimatedLots > 0) || estimatedLots < market.min) {
+        throw new Error(`按参考精度向下取整后低于最小${market.min}手；不会向上凑单，请调整风险预算或止损距离`);
+      }
+      if (estimatedLots > maxLots) {
+        throw new Error(`取整后需要${estimatedLots}手，超过参考单笔${maxLots}手上限；不会自动截仓`);
+      }
+    }
+    const units = roundLots ? estimatedLots * market.multiplier : theoreticalNotional / mid;
+    const notional = roundLots ? units * mid : theoreticalNotional;
+    // Exact decimal sizing already proved affordability. Clamp only binary
+    // display arithmetic, never the exact comparison used to choose the lots.
+    const actualPriceRisk = roundLots ? Math.min(risk, notional * stopFraction) : risk;
+    const proxyQuantity = units / proxyMultiplier;
+    if (![notional, units, proxyQuantity, estimatedLots, actualPriceRisk].every(value => Number.isFinite(value) && value > 0)) {
+      throw new Error("输入数值过大或止损距离过小，请调整");
+    }
+    if (roundLots && actualPriceRisk > risk) throw new Error("手数取整后风险仍超过预算，请调整参考手数精度");
     const buy = core.sweep(asks, proxyQuantity, proxyMultiplier);
     const sell = core.sweep(bids, proxyQuantity, proxyMultiplier);
     if (!buy.complete || !sell.complete || buy.vwap == null || sell.vwap == null) {
@@ -167,7 +246,7 @@
     const extraSlipCost = notional * (slipBp / 10000);
     const rebateValue = notional * (rebateBp / 10000);
     const cost = Math.max(0, baseCost - rebateValue) + impactCost + extraSlipCost;
-    const totalLoss = risk + cost;
+    const totalLoss = actualPriceRisk + cost;
     const riskPercent = cost / risk * 100;
     const totalLossR = totalLoss / risk;
     const netBp = cost / notional * 10000;
@@ -177,6 +256,7 @@
       throw new Error("输入数值过大或止损距离过小，请调整");
     }
     return { status: "ok", symbol: c.symbol, account: c.account, risk, stopPercent, notional,
+      theoreticalNotional, theoreticalLots, lotStep, maxLots, roundLots, actualPriceRisk,
       cost, totalLoss, totalLossR, riskPercent, netBp, baseBp, baseCost, impactCost,
       buyImpactCost, sellImpactCost, extraSlipCost, rebateValue, referenceSpreadCost,
       exnessCommissionCost, baselineMode: hasBase ? "configured" : "proxy-spread",

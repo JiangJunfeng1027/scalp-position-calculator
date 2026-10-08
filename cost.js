@@ -1905,6 +1905,7 @@
     document.getElementById("exnessInputs").hidden = !isExness;
     document.getElementById("marketMetrics").hidden = isExness;
     document.getElementById("exnessMetrics").hidden = !isExness;
+    document.getElementById("exLotRules").hidden = !isExness;
     document.getElementById("exScaleNote").hidden = true;
     document.querySelectorAll(".breakdown > .breakdown-row").forEach(node => node.hidden = isExness);
     document.querySelector(".breakdown .section-heading h2").textContent = isExness ? "基础费用＋参考盘口冲击" : "钱消失在哪里";
@@ -2179,6 +2180,17 @@
   });
 
   el.copySummary.addEventListener("click", copySummary);
+  document.getElementById("exCopyLots").addEventListener("click", async () => {
+    const text = exnessView.lotsText();
+    if (!text) return;
+    const button = document.getElementById("exCopyLots");
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+      else if (!copyFallback(text)) throw new Error("copy failed");
+      button.textContent = "已复制";
+      window.setTimeout(() => { button.textContent = "复制手数"; }, 1300);
+    } catch { setMessage("复制失败，请手动记录手数。", "error"); }
+  });
   document.addEventListener("visibilitychange", () => {
     if (state.platform === "exness") {
       if (document.hidden) exnessView.pause();

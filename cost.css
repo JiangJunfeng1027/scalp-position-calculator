@@ -1123,3 +1123,6 @@ select {
 .exness-scale-note { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.7; }
 .exness-scale-note strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
 .exness-scale-note p { margin: 5px 0 0; color: var(--muted); }
+.exness-lot-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.exness-lot-heading .text-button { font-size: 11px; min-height: 28px; }
+.exness-lot-rules { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); line-height: 1.7; overflow-wrap: anywhere; }

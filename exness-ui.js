@@ -2,7 +2,7 @@
   "use strict";
   window.createExnessView = function ({ el, state, format, numberValue, renderEmpty, setLiveState, setMessage, sources, loadBook, closeSource }) {
     const core = window.ExnessCore;
-    const ids = ["exAccount", "exBaseBp", "exSlipBp", "exRebateBp", "exReset", "exRateNote", "exPosition", "exCost", "exNetRate", "exImpact", "exDepthDetails", "exTotalLoss", "exTotalR", "exReferenceNote", "exScaleNote", "exRiskEquation", "exProxyDescription", "exProxyBreakdown"];
+    const ids = ["exAccount", "exBaseBp", "exSlipBp", "exRebateBp", "exLotStep", "exMaxLots", "exLots", "exCopyLots", "exLotNote", "exLotRules", "exReset", "exRateNote", "exPosition", "exCost", "exNetRate", "exImpact", "exDepthDetails", "exTotalLoss", "exTotalR", "exReferenceNote", "exScaleNote", "exRiskEquation", "exProxyDescription", "exProxyBreakdown"];
     const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
     const key = "execution-cost-exness-ratio-v2";
     const MAX_AGE = 15_000;
@@ -15,9 +15,11 @@
     const source = () => sources[market()?.id];
     const pairKey = () => `${ui.exAccount.value}:${market()?.id}`;
     const reference = () => core.referenceBp[ui.exAccount.value]?.[market()?.id];
+    // Lots must not use the price formatter, which rounds small values to five decimals.
+    const lotNumber = r => r.estimatedLots.toFixed(window.CostCore.decimalPlaces(r.lotStep));
     function save() {
       prefs.account = ui.exAccount.value;
-      prefs[pairKey()] = { baseBp: ui.exBaseBp.value, slipBp: ui.exSlipBp.value, rebateBp: ui.exRebateBp.value };
+      prefs[pairKey()] = { baseBp: ui.exBaseBp.value, slipBp: ui.exSlipBp.value, rebateBp: ui.exRebateBp.value, lotStep: ui.exLotStep.value, maxLots: ui.exMaxLots.value };
       try { localStorage.setItem(key, JSON.stringify(prefs)); } catch { /* Storage may be unavailable. */ }
     }
     function applySettings() {
@@ -25,6 +27,8 @@
       ui.exBaseBp.value = saved?.baseBp ?? reference() ?? "";
       ui.exSlipBp.value = saved?.slipBp ?? "0";
       ui.exRebateBp.value = saved?.rebateBp ?? "0";
+      ui.exLotStep.value = saved?.lotStep ?? market()?.step ?? "0.01";
+      ui.exMaxLots.value = saved?.maxLots ?? market()?.max ?? "";
     }
     function stop() {
       generation += 1;
@@ -92,10 +96,16 @@
       if (state.platform !== "exness" || !market()) return;
       const m = market(), proxy = source();
       renderEmpty(); result = null;
+      ui.exCopyLots.disabled = true;
+      ui.exCopyLots.textContent = "复制手数";
       ui.exScaleNote.hidden = true;
       ui.exRiskEquation.textContent = "--";
       ui.exProxyBreakdown.textContent = "等待参考盘口…";
-      [ui.exPosition, ui.exCost, ui.exNetRate, ui.exImpact, ui.exDepthDetails, ui.exTotalLoss, ui.exTotalR].forEach(node => node.textContent = "--");
+      [ui.exLots, ui.exCost, ui.exNetRate, ui.exImpact, ui.exDepthDetails, ui.exTotalLoss, ui.exTotalR].forEach(node => node.textContent = "--");
+      ui.exPosition.textContent = "名义仓位 --";
+      ui.exLotNote.textContent = "按参考步进向下取整";
+      const contractLabel = m.id === "USTEC" ? `每手每点 ${m.multiplier} 美元` : `每手 ${format(m.multiplier)} ${m.unit}`;
+      ui.exLotRules.textContent = `${contractLabel} · 最小 ${m.min} 手 · 参考上限 ${ui.exMaxLots.value || "--"} 手 · 参考步进 ${ui.exLotStep.value || "--"} 手。上限和步进可在设置中修改，以交易终端为准。`;
       const autoBase = !ui.exBaseBp.value.trim();
       const historical = !autoBase && ui.exBaseBp.value === String(reference() ?? "");
       const baseLabel = autoBase ? "参考点差＋Exness佣金" : historical ? "历史基础费率" : "自设基础费率";
@@ -127,6 +137,7 @@
         result = core.estimateProxy({ symbol: m.id, account: ui.exAccount.value,
           stopPercent: numberValue(el.stopPercent), risk: numberValue(el.risk),
           baseBp: ui.exBaseBp.value, slipBp: ui.exSlipBp.value, rebateBp: ui.exRebateBp.value,
+          lotStep: ui.exLotStep.value, maxLots: ui.exMaxLots.value,
           redline: numberValue(el.redline), bids: book.bids, asks: book.asks,
           proxyMultiplier: proxy.multiplier, method: "conservative" });
         const r = result;
@@ -139,18 +150,22 @@
         ui.exRiskEquation.textContent = `成本 ${format(r.cost, 2)} U ÷ 风险预算 ${format(r.risk, 2)} U ≈ ${format(r.riskPercent, 2)}%`;
         ui.exScaleNote.hidden = false;
         el.riskFill.style.width = `${Math.min(100, Math.max(0, r.riskPercent / 10 * 100))}%`;
-        ui.exPosition.textContent = `${format(r.notional, 2)} U`;
+        ui.exLots.textContent = `${lotNumber(r)} 手`;
+        ui.exPosition.textContent = `名义仓位 ${format(r.notional, 2)} U`;
+        ui.exLotNote.textContent = `按 ${r.lotStep} 手向下取整`;
+        ui.exLotRules.textContent = `参考价 ${format(r.mid, 5)} 美元 · ${ui.exLotRules.textContent}`;
         ui.exCost.textContent = `${format(r.cost, 2)} U`;
         ui.exNetRate.textContent = `含冲击总成本率 万${format(r.netBp, 5)}`;
         ui.exImpact.textContent = `${format(r.impactCost, 2)} U`;
         ui.exDepthDetails.textContent = `买侧${r.buy.levelsUsed}档 · 卖侧${r.sell.levelsUsed}档`;
         ui.exTotalLoss.textContent = `${format(r.totalLoss, 2)} U`;
-        ui.exTotalR.textContent = `价格风险 ${format(r.risk, 2)} U · 总亏 ${format(r.totalLossR, 5)} R`;
+        ui.exTotalR.textContent = `实际价格风险 ${format(r.actualPriceRisk, 2)} U · 总亏 ${format(r.totalLossR, 5)} R`;
         ui.exProxyBreakdown.textContent = `${baseLabel} ${format(r.baseCost, 2)} U ＋ 参考盘口冲击 ${format(r.impactCost, 2)} U ＋ 额外滑点 ${format(r.extraSlipCost, 2)} U − 假设返佣 ${format(r.rebateValue, 2)} U`;
         const live = state.liveEnabled && !document.hidden;
         setLiveState(live ? "live" : "paused", live ? "参考盘口实时" : "已暂停 · 快照", book.time);
         el.copySummary.disabled = false;
-        setMessage(`按同名义金额映射到${proxy.label}，不计币安或Bybit手续费。${autoBase ? "基础点差也使用参考平台，Exness佣金按当前账户类型计。" : "基础费率已含点差与佣金，仅叠加参考盘口额外冲击。"}结果为用户指定的跨平台近似；不保证Exness成交能力，未计手数取整、未来跳空与隔夜。`, zone === "bad" ? "error" : "warning");
+        ui.exCopyLots.disabled = false;
+        setMessage(`按同名义金额映射到${proxy.label}，不计币安或Bybit手续费。${autoBase ? "基础点差也使用参考平台，Exness佣金按当前账户类型计。" : "基础费率已含点差与佣金，仅叠加参考盘口额外冲击。"}手数按参考步进向下取整；以终端规格与Exness实际报价为准。跨平台近似，不保证Exness成交能力，未计未来跳空与隔夜。`, zone === "bad" ? "error" : "warning");
       } catch (error) {
         result = null;
         el.heroVerdict.textContent = error.message;
@@ -165,18 +180,25 @@
       return [`EXNESS ${market().id} · ${core.accounts[ui.exAccount.value]} · 跨平台代理深度估算`,
         `参考盘口：${proxy.label}｜报价时间 ${new Date(book.time).toISOString()}`,
         `止损 ${r.stopPercent}%｜风险预算 ${format(r.risk, 2)}U｜估算名义仓位 ${format(r.notional, 2)}U`,
+        `Exness参考手数 ${lotNumber(r)}手｜实际价格风险 ${format(r.actualPriceRisk, 2)}U`,
+        ui.exLotRules.textContent,
         `总成本 ${format(r.cost, 2)}U｜成本占风险 ${format(r.riskPercent, 2)}%｜止损总亏 ${format(r.totalLoss, 2)}U`,
         ui.exProxyBreakdown.textContent, ui.exRiskEquation.textContent,
         `买侧${r.buy.levelsUsed}档／卖侧${r.sell.levelsUsed}档；额外冲击按较差侧×2。`,
         `基础费用：${r.baselineMode === "proxy-spread" ? "参考平台点差＋Exness佣金" : "设定的完整基础费率（含点差与佣金）"}；不收参考平台手续费。`,
-        `条件：${proxy.venue === "binance" ? "USDT约等于USD；" : "Bybit为指示性深度；"}不是Exness真实盘口，不保证成交，不含手数取整、隔夜与未来跳空。`].join("\n");
+        `条件：手数按参考步进向下取整；${proxy.venue === "binance" ? "USDT约等于USD；" : "Bybit为指示性深度；"}不是Exness真实盘口，不保证成交，不含隔夜与未来跳空。`].join("\n");
+    }
+    function lotsText() {
+      render();
+      return result ? lotNumber(result) : null;
     }
     ui.exAccount.addEventListener("change", () => { prefs.account = ui.exAccount.value; applySettings(); save(); render(); });
-    ["exBaseBp", "exSlipBp", "exRebateBp"].forEach(k => ui[k].addEventListener("input", () => { save(); render(); }));
+    ["exBaseBp", "exSlipBp", "exRebateBp", "exLotStep", "exMaxLots"].forEach(k => ui[k].addEventListener("input", () => { save(); render(); }));
     ui.exReset.addEventListener("click", () => {
       ui.exBaseBp.value = reference() ?? ""; ui.exSlipBp.value = "0"; ui.exRebateBp.value = "0";
+      ui.exLotStep.value = market().step; ui.exMaxLots.value = market().max;
       save(); render();
     });
-    return { resetMarket, render, summary, refresh, pause, stop };
+    return { resetMarket, render, summary, lotsText, refresh, pause, stop };
   };
 })();
