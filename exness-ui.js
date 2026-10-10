@@ -104,14 +104,14 @@
       [ui.exLots, ui.exCost, ui.exNetRate, ui.exImpact, ui.exDepthDetails, ui.exTotalLoss, ui.exTotalR].forEach(node => node.textContent = "--");
       ui.exPosition.textContent = "名义仓位 --";
       ui.exLotNote.textContent = "按参考步进向下取整";
-      const contractLabel = m.id === "USTEC" ? `每手每点 ${m.multiplier} 美元` : `每手 ${format(m.multiplier)} ${m.unit}`;
+      const contractLabel = m.unit === "美元/点" ? `每手每点 ${m.multiplier} 美元` : `每手 ${format(m.multiplier)} ${m.unit}`;
       ui.exLotRules.textContent = `${contractLabel} · 最小 ${m.min} 手 · 参考上限 ${ui.exMaxLots.value || "--"} 手 · 参考步进 ${ui.exLotStep.value || "--"} 手。上限和步进可在设置中修改，以交易终端为准。`;
       const autoBase = !ui.exBaseBp.value.trim();
       const historical = !autoBase && ui.exBaseBp.value === String(reference() ?? "");
       const baseLabel = autoBase ? "参考点差＋Exness佣金" : historical ? "历史基础费率" : "自设基础费率";
       el.contextPlatform.textContent = `EXNESS · ${core.accounts[ui.exAccount.value]}`;
       el.contextSymbol.textContent = m.id;
-      el.productNote.textContent = `${m.name} · ${core.accounts[ui.exAccount.value]} · 深度参考${proxy.label}`;
+      el.productNote.textContent = `${m.name}${m.id === "US500" ? " · 非ES期货" : ""} · ${core.accounts[ui.exAccount.value]} · 深度参考${proxy.label}`;
       el.productNote.classList.add("warning-note");
       el.frameCount.textContent = `${proxy.label} · 跨平台近似`;
       el.heroLabel.textContent = "代理深度估算成本 / 风险";
@@ -165,7 +165,7 @@
         setLiveState(live ? "live" : "paused", live ? "参考盘口实时" : "已暂停 · 快照", book.time);
         el.copySummary.disabled = false;
         ui.exCopyLots.disabled = false;
-        setMessage(`按同名义金额映射到${proxy.label}，不计币安或Bybit手续费。${autoBase ? "基础点差也使用参考平台，Exness佣金按当前账户类型计。" : "基础费率已含点差与佣金，仅叠加参考盘口额外冲击。"}手数按参考步进向下取整；以终端规格与Exness实际报价为准。跨平台近似，不保证Exness成交能力，未计未来跳空与隔夜。`, zone === "bad" ? "error" : "warning");
+        setMessage(`按同名义金额映射到${proxy.label}，不计币安或Bybit手续费。${autoBase ? "基础点差也使用参考平台，Exness佣金按当前账户类型计。" : "基础费率已含点差与佣金，仅叠加参考盘口额外冲击。"}手数按参考步进向下取整；以终端规格与Exness实际报价为准。跨平台近似，不保证Exness成交能力，未计未来跳空、隔夜与股息调整。`, zone === "bad" ? "error" : "warning");
       } catch (error) {
         result = null;
         el.heroVerdict.textContent = error.message;
@@ -178,6 +178,7 @@
       if (!result) return null;
       const r = result, proxy = source();
       return [`EXNESS ${market().id} · ${core.accounts[ui.exAccount.value]} · 跨平台代理深度估算`,
+        ...(market().id === "US500" ? ["产品：US500 标普500差价合约（CFD），非ES期货，非US500_x100"] : []),
         `参考盘口：${proxy.label}｜报价时间 ${new Date(book.time).toISOString()}`,
         `止损 ${r.stopPercent}%｜风险预算 ${format(r.risk, 2)}U｜估算名义仓位 ${format(r.notional, 2)}U`,
         `Exness参考手数 ${lotNumber(r)}手｜实际价格风险 ${format(r.actualPriceRisk, 2)}U`,
@@ -186,7 +187,7 @@
         ui.exProxyBreakdown.textContent, ui.exRiskEquation.textContent,
         `买侧${r.buy.levelsUsed}档／卖侧${r.sell.levelsUsed}档；额外冲击按较差侧×2。`,
         `基础费用：${r.baselineMode === "proxy-spread" ? "参考平台点差＋Exness佣金" : "设定的完整基础费率（含点差与佣金）"}；不收参考平台手续费。`,
-        `条件：手数按参考步进向下取整；${proxy.venue === "binance" ? "USDT约等于USD；" : "Bybit为指示性深度；"}不是Exness真实盘口，不保证成交，不含隔夜与未来跳空。`].join("\n");
+        `条件：手数按参考步进向下取整；${proxy.venue === "binance" ? "USDT约等于USD；" : "Bybit为指示性深度；"}不是Exness真实盘口，不保证成交，不含隔夜、股息调整与未来跳空。`].join("\n");
     }
     function lotsText() {
       render();

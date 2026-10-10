@@ -14,6 +14,7 @@
     { id: "XAUUSD", name: "黄金", multiplier: 100, unit: "盎司", min: 0.01, max: 200, raw: 7, zero: 11 },
     { id: "XAGUSD", name: "白银", multiplier: 5000, unit: "盎司", min: 0.01, max: 20, raw: 7, zero: 100 },
     { id: "USTEC", name: "纳斯达克100", multiplier: 1, unit: "美元/点", min: 0.05, max: 200, raw: 0.625, zero: 1.25 },
+    { id: "US500", name: "标普500（CFD）", quickLabel: "US500 · 标普", multiplier: 1, unit: "美元/点", min: 0.14, max: 300, raw: 0.25, zero: 0.5, checkedAt: "2026-10-11" },
     { id: "USOIL", name: "WTI原油（CL）", quickLabel: "CL · 原油", multiplier: 1000, unit: "桶", min: 0.01, max: 20, raw: 7, zero: 12.5, checkedAt: "2026-09-24" },
   ].map(m => ({ ...m, bookSymbol: m.id, display: `${m.id} · ${m.name}`, step: "0.01" }));
 

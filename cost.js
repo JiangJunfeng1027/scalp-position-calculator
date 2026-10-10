@@ -21,6 +21,7 @@
     XAUUSD: { venue: "bybit", symbol: "XAUUSD+", multiplier: 100, label: "Bybit XAUUSD+" },
     XAGUSD: { venue: "bybit", symbol: "XAGUSD", multiplier: 5000, label: "Bybit XAGUSD" },
     USTEC: { venue: "bybit", symbol: "NAS100", multiplier: 1, label: "Bybit NAS100" },
+    US500: { venue: "bybit", symbol: "SP500", multiplier: 1, label: "Bybit SP500（标普500）" },
     USOIL: { venue: "bybit", symbol: "USOUSD", multiplier: 1000, label: "Bybit USOUSD（WTI原油）" },
   };
   const BYBIT_CFD_MARKETS = [
@@ -1011,6 +1012,7 @@
     if (state.platform === "exness") {
       if (["BTC", "ETH", "XAU", "XAG"].includes(raw)) candidates.push(`${raw}USD`);
       if (["纳指", "NASDAQ", "NAS100", "US100"].includes(raw)) candidates.push("USTEC");
+      if (["标普", "标普500", "S&P500", "SP500", "SPX500", "SPX"].includes(raw)) candidates.push("US500");
     }
     if (state.platform === "binance" && !raw.endsWith("USDT")) candidates.push(`${raw}USDT`);
     if (state.platform === "hl-xyz" && !raw.startsWith("XYZ:")) candidates.push(`XYZ:${raw}`);
@@ -1871,7 +1873,7 @@
     const isExness = state.platform === "exness";
     document.getElementById("pageHeading").textContent = isExness ? "交易成本估算" : "实时成本估算";
     document.getElementById("controlIntro").textContent = isExness
-      ? "风险预算不含摩擦。按Exness费用与参考盘口逐档估算；BTC/ETH参考币安，金银/纳指/原油参考Bybit。"
+      ? "风险预算不含摩擦。按Exness费用与参考盘口逐档估算；BTC/ETH参考币安，金银/指数/原油参考Bybit。"
       : "风险不含摩擦。仓位按止损反推，再用公开盘口估算进出成本。";
     const limitUnsupported = isBybit || isExness;
     const limitButton = document.querySelector('[data-execution="limit"]');

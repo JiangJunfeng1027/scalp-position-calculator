@@ -21,6 +21,14 @@ const eth = core.estimate({ ...base, symbol: "ETHUSD", bid: 3999.5, ask: 4000.5,
 near(eth.lots, 25); near(eth.cost, 37.5);
 const nas = core.estimate({ ...base, symbol: "USTEC", bid: 24999.5, ask: 25000.5, commission: 0.625 });
 near(nas.lots, 4); near(nas.cost, 6.5);
+const spMarket = core.markets.find(m => m.id === "US500");
+assert.equal(spMarket.name, "标普500（CFD）"); assert.equal(spMarket.quickLabel, "US500 · 标普");
+assert.equal(spMarket.checkedAt, "2026-10-11"); assert.equal(spMarket.step, "0.01");
+near(spMarket.multiplier, 1); near(spMarket.min, 0.14); near(spMarket.max, 300);
+near(core.commission(spMarket, "raw"), 0.25); near(core.commission(spMarket, "zero"), 0.5);
+assert.equal(core.markets.find(m => m.id === "US500_x100"), undefined);
+const sp = core.estimate({ ...base, symbol: "US500", bid: 4999.95, ask: 5000.05, commission: 0.25 });
+near(sp.lots, 20); near(sp.spreadCost, 2); near(sp.feeCost, 5); near(sp.cost, 7);
 const oilMarket = core.markets.find(m => m.id === "USOIL");
 near(oilMarket.multiplier, 1000);
 near(core.commission(oilMarket, "raw"), 7);
@@ -45,7 +53,7 @@ for (let risk = 37; risk < 999; risk += 17) {
   const r = core.estimate({ ...base, risk });
   assert.ok(r.priceRisk <= risk + 1e-8);
 }
-console.log("Exness cost tests passed (6 symbols, account commissions, rounding, invalid inputs).");
+console.log("Exness cost tests passed (7 symbols, account commissions, rounding, invalid inputs).");
 
 // Budget scales money values while bp / stop-percent stays percent of R.
 const ratioBase = { risk: 200, baseBp: 0.4, stopPercent: 0.2, slipBp: 0, rebateBp: 0, redline: 5 };
@@ -72,6 +80,7 @@ assert.equal(core.referenceBp.raw.ETHUSD, undefined);
 assert.equal(core.referenceBp.raw.XAGUSD, undefined);
 assert.equal(core.referenceBp.raw.USTEC, undefined);
 assert.equal(core.referenceBp.raw.USOIL, undefined);
+for (const account of Object.keys(core.accounts)) assert.equal(core.referenceBp[account].US500, undefined);
 console.log("Exness ratio tests passed (risk budget, money values, units, redline, unknown baselines, invalid inputs).");
 
 const proxyBase = { symbol: "BTCUSD", account: "raw", risk: 200, stopPercent: 0.2,
@@ -109,6 +118,7 @@ for (const [symbol, mid, multiplier] of [
   ["BTCUSD", 80000, 1], ["ETHUSD", 4000, 1], ["XAUUSD", 4000, 100],
   ["XAGUSD", 40, 5000], ["USTEC", 25000, 1], ["USTEC", 25000, 10],
   ["USOIL", 80, 1000], ["USOIL", 80, 100],
+  ["US500", 5000, 1],
 ]) {
   const units = 100000 / mid;
   const spread = mid / 100000;
@@ -225,6 +235,7 @@ assert.throws(() => core.estimateProxy({ ...roundedGoldBase, lotStep: 1 }), /最
 for (const [symbol, mid, proxyMultiplier] of [
   ["BTCUSD", 80000, 1], ["ETHUSD", 4000, 1], ["XAUUSD", 4000, 100],
   ["XAGUSD", 40, 5000], ["USTEC", 25000, 1], ["USOIL", 80, 1000],
+  ["US500", 5000, 1],
 ]) {
   const market = core.markets.find(m => m.id === symbol);
   const config = { ...proxyBase, symbol, risk: 201, lotStep: 0.01, proxyMultiplier,
@@ -284,4 +295,51 @@ for (let risk = 17; risk < 997; risk += 13.17) {
 assert.equal(tinyProxy.roundLots, false); assert.equal(tinyProxy.lotStep, null);
 near(tinyProxy.theoreticalLots, tinyProxy.estimatedLots);
 near(tinyProxy.theoreticalNotional, tinyProxy.notional); near(tinyProxy.actualPriceRisk, 0.2);
-console.log("Exness rounded-lot tests passed (6 symbols, consistent risk/cost, optional compatibility, lot limits, numerical boundaries).");
+console.log("Exness rounded-lot tests passed (7 symbols, consistent risk/cost, optional compatibility, lot limits, numerical boundaries).");
+
+// US500 is the ordinary 1 USD/point CFD, not ES futures or US500_x100.
+// 201.09 USD budget at 0.2% and a 5,000 reference price gives 20.109
+// theoretical lots, rounded down to 20.10 before fees and proxy sweeps.
+const spProxyBase = { ...proxyBase, symbol: "US500", risk: 201.09, baseBp: "", lotStep: "0.01",
+  bids: [[4999.95, 2000]], asks: [[5000.05, 2000]] };
+const spProxy = core.estimateProxy(spProxyBase);
+near(spProxy.theoreticalLots, 20.109); near(spProxy.estimatedLots, 20.1);
+near(spProxy.notional, 100500); near(spProxy.proxyQuantity, 20.1);
+near(spProxy.actualPriceRisk, 201); near(spProxy.referenceSpreadCost, 2.01);
+near(spProxy.exnessCommissionCost, 5.025); near(spProxy.cost, 7.035);
+near(spProxy.totalLoss, 208.035); near(spProxy.riskPercent, 7.035 / 201.09 * 100);
+assert.equal(spProxy.baselineMode, "proxy-spread"); assert.equal(spProxy.maxLots, 300);
+for (const [account, commission, cost] of [
+  ["raw", 5.025, 7.035], ["zero", 10.05, 12.06], ["pro", 0, 2.01], ["standard", 0, 2.01],
+]) {
+  const r = core.estimateProxy({ ...spProxyBase, account });
+  near(r.exnessCommissionCost, commission); near(r.cost, cost);
+  assert.ok(r.actualPriceRisk <= r.risk);
+}
+const spConfigured = core.estimateProxy({ ...spProxyBase, account: "zero", baseBp: 0.4 });
+near(spConfigured.cost, 4.02); near(spConfigured.exnessCommissionCost, 0);
+near(spConfigured.referenceSpreadCost, 0); assert.equal(spConfigured.baselineMode, "configured");
+const spRebated = core.estimateProxy({ ...spProxyBase, baseBp: 0.4, slipBp: 0.2, rebateBp: 0.1 });
+near(spRebated.extraSlipCost, 2.01); near(spRebated.rebateValue, 1.005); near(spRebated.cost, 5.025);
+assert.throws(() => core.estimateProxy({ ...spProxyBase, baseBp: 0.4, rebateBp: 0.40001 }), /返佣/);
+assert.throws(() => core.estimateProxy({ ...spProxyBase, rebateBp: spProxy.baseBp + 0.001 }), /返佣/);
+const spMinimum = core.estimateProxy({ ...spProxyBase, risk: 1.4 });
+assert.equal(spMinimum.estimatedLots, 0.14); near(spMinimum.actualPriceRisk, 1.4);
+assert.throws(() => core.estimateProxy({ ...spProxyBase, risk: 1.3999999999999997 }), /最小0.14手/);
+assert.equal(core.estimateProxy({ ...spProxyBase, risk: 3000 }).estimatedLots, 300);
+assert.throws(() => core.estimateProxy({ ...spProxyBase, risk: 3000.1 }), /参考单笔300手上限/);
+// A caller may supply another confirmed session/account limit; no silent cap.
+assert.equal(core.estimateProxy({ ...spProxyBase, risk: 10000, maxLots: 1000 }).estimatedLots, 1000);
+assert.throws(() => core.estimateProxy({ ...spProxyBase, risk: 10000.1, maxLots: 1000 }), /参考单笔1000手上限/);
+const spTwoLevels = { ...spProxyBase, bids: [[4999.95, 10], [4999.5, 10.1]],
+  asks: [[5000.05, 10], [5000.5, 10.1]] };
+const spImpacted = core.estimateProxy(spTwoLevels);
+assert.equal(spImpacted.buy.levelsUsed, 2); assert.equal(spImpacted.sell.levelsUsed, 2);
+near(spImpacted.buyImpactCost, 4.545); near(spImpacted.sellImpactCost, 4.545);
+near(spImpacted.impactCost, 9.09); near(spImpacted.cost, 16.125);
+near(core.estimateProxy({ ...spTwoLevels, baseBp: 0.4 }).cost, 13.11);
+for (const side of ["bids", "asks"]) {
+  assert.throws(() => core.estimateProxy({ ...spTwoLevels, [side]: [[side === "bids" ? 4999.95 : 5000.05, 20]] }), /深度不足/);
+}
+assert.throws(() => core.estimateProxy({ ...spProxyBase, symbol: "US500_x100" }), /标的无效/);
+console.log("Exness US500 tests passed (ordinary CFD units, all accounts, rounded lots, minimum/default and custom limits, rebates, depth).");
