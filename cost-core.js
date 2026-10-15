@@ -767,28 +767,49 @@
       };
     }
 
-    const rawScale = asset?.deployerFeeScale ?? dexMeta?.deployerFeeScale;
-    const scale = Number(rawScale);
+    const unknownFees = (source) => ({
+      rate: null,
+      takerRate: null,
+      makerRate: null,
+      product: "HIP-3永续",
+      source,
+    });
+    const hasAssetScale = asset != null && Object.prototype.hasOwnProperty.call(asset, "deployerFeeScale");
+    // An explicit invalid asset value must not borrow another source's fee.
+    // A DEX fallback is only valid for the asset's own deployment.
+    const assetDex = typeof asset?.name === "string" && asset.name.includes(":")
+      ? asset.name.split(":", 1)[0]
+      : null;
+    if (!hasAssetScale && assetDex && dexMeta && dexMeta.name !== assetDex) {
+      return unknownFees("部署市场参数不匹配");
+    }
+    const rawScale = hasAssetScale ? asset.deployerFeeScale : dexMeta?.deployerFeeScale;
+    const numericScale = typeof rawScale === "number" || (
+      typeof rawScale === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(rawScale.trim())
+    );
+    const scale = numericScale ? Number(rawScale) : NaN;
     if (!Number.isFinite(scale) || scale < 0) {
-      return {
-        rate: null,
-        takerRate: null,
-        makerRate: null,
-        product: "HIP-3永续",
-        source: "部署费率未知",
-      };
+      return unknownFees("部署费率未知");
+    }
+    const hasGrowthMode = asset != null && Object.prototype.hasOwnProperty.call(asset, "growthMode");
+    const rawGrowthMode = asset?.growthMode;
+    const growth = rawGrowthMode === "enabled" || rawGrowthMode === true;
+    if (hasGrowthMode && !growth && rawGrowthMode !== "disabled" && rawGrowthMode !== false) {
+      return unknownFees("增长模式未知");
     }
     const hip3Scale = scale < 1 ? 1 + scale : 2 * scale;
-    const growth = asset?.growthMode === "enabled" || asset?.growthMode === true;
     const growthScale = growth ? 0.1 : 1;
     const takerRate = baseTaker * hip3Scale * growthScale;
     const makerRate = baseMaker * hip3Scale * growthScale;
+    if (!Number.isFinite(takerRate) || !Number.isFinite(makerRate)) {
+      return unknownFees("部署费率未知");
+    }
     return {
       rate: takerRate,
       takerRate,
       makerRate,
       product: growth ? "HIP-3增长模式" : "HIP-3标准模式",
-      source: asset?.deployerFeeScale != null ? "资产级链上参数" : "DEX级回退参数",
+      source: hasAssetScale ? "资产级链上参数" : "DEX级回退参数",
       growth,
       deployerFeeScale: scale,
     };

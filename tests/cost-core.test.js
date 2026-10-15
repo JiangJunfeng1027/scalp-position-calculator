@@ -206,6 +206,88 @@ close(hyperliquidFees.rate, core.inferHyperliquidTaker(
   false,
 ).rate);
 
+// Invalid metadata must not coerce to a zero fee scale or borrow a valid fallback.
+function unknownHyperliquidFees(asset, dexMeta = null) {
+  const fees = core.inferHyperliquidFees(asset, dexMeta, false);
+  assert.equal(fees.rate, null);
+  assert.equal(fees.takerRate, null);
+  assert.equal(fees.makerRate, null);
+  return fees;
+}
+const ioFeeMeta = { name: "io", deployerFeeScale: "1.0" };
+for (const badScale of [
+  null, undefined, "", " ", false, true, [], [1], {}, { valueOf: () => 1 },
+  -1, "-0.1", NaN, Infinity, -Infinity, "NaN", "Infinity", "0x1", "1_000",
+]) {
+  unknownHyperliquidFees(
+    { name: "io:ANTH", deployerFeeScale: badScale, growthMode: "enabled" },
+    ioFeeMeta,
+  );
+  unknownHyperliquidFees(
+    { name: "io:ANTH", growthMode: "enabled" },
+    { name: "io", deployerFeeScale: badScale },
+  );
+}
+unknownHyperliquidFees({ name: "io:ANTH", growthMode: "enabled" });
+for (const badGrowth of [null, undefined, "", "ENABLED", "false", "unknown", 0, 1, [], {}]) {
+  unknownHyperliquidFees(
+    { name: "io:ANTH", deployerFeeScale: "1.0", growthMode: badGrowth },
+    ioFeeMeta,
+  );
+}
+
+// Zero is a real scale; explicit known growth states and absent growth remain valid.
+for (const zeroScale of [0, "0", "0.0"]) {
+  close(core.inferHyperliquidFees({ deployerFeeScale: zeroScale }, null, false).takerRate, 0.00045);
+  close(core.inferHyperliquidFees(
+    { deployerFeeScale: zeroScale, growthMode: "enabled" }, null, false,
+  ).takerRate, 0.000045);
+}
+for (const growthMode of ["enabled", true]) {
+  for (const deployerFeeScale of [1, "1.0", " 1.0 ", "1e0"]) {
+    const fees = core.inferHyperliquidFees({ deployerFeeScale, growthMode }, null, false);
+    close(fees.takerRate, 0.00009);
+    close(fees.makerRate, 0.00003);
+  }
+}
+for (const growthMode of ["disabled", false]) {
+  close(core.inferHyperliquidFees(
+    { deployerFeeScale: "1.0", growthMode }, null, false,
+  ).takerRate, 0.0009);
+}
+// Do not impose an old growth-mode cap of one on the documented formula.
+for (const deployerFeeScale of [3.01, 9.99, 10]) {
+  close(core.inferHyperliquidFees(
+    { deployerFeeScale, growthMode: true }, null, false,
+  ).takerRate, 0.00045 * 2 * deployerFeeScale * 0.1);
+}
+
+// Each asset keeps its own deployment fee; another DEX cannot supply its fallback.
+const xyzFeeMeta = { name: "xyz", deployerFeeScale: "0.5" };
+const ioFallbackFees = core.inferHyperliquidFees(
+  { name: "io:OAI", growthMode: "enabled" }, ioFeeMeta, false,
+);
+close(ioFallbackFees.takerRate, 0.00009);
+assert.equal(ioFallbackFees.source, "DEX级回退参数");
+unknownHyperliquidFees({ name: "io:OAI", growthMode: "enabled" }, xyzFeeMeta);
+unknownHyperliquidFees({ name: "xyz:OURA", growthMode: "enabled" }, ioFeeMeta);
+unknownHyperliquidFees({ name: "io:OAI", growthMode: "enabled" }, { deployerFeeScale: "1.0" });
+const ioAssetFees = core.inferHyperliquidFees(
+  { name: "io:ANTH", deployerFeeScale: "1.0", growthMode: "enabled" }, xyzFeeMeta, false,
+);
+close(ioAssetFees.takerRate, 0.00009);
+assert.equal(ioAssetFees.source, "资产级链上参数");
+const xyzFallbackFees = core.inferHyperliquidFees(
+  { name: "xyz:OURA", growthMode: "enabled" }, xyzFeeMeta, false,
+);
+close(xyzFallbackFees.takerRate, 0.0000675);
+close(core.inferHyperliquidFees(
+  { name: "io:OAI" }, { ...ioFeeMeta, growthMode: "enabled" }, false,
+).takerRate, 0.0009);
+close(core.inferHyperliquidFees(
+  { deployerFeeScale: null, growthMode: "unknown" }, xyzFeeMeta, true,
+).takerRate, 0.00045);
+
 // 10. Rolling selection returns current, median sample, and raw worst without deleting tails.
 const samples = [2, 4, 3].map((value, index) => ({
   id: index,

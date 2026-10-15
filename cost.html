@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=24" />
+    <link rel="stylesheet" href="./cost.css?v=25" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -50,6 +50,7 @@
               <option value="binance">币安 U本位</option>
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
+              <option value="hl-preipo">Hyperliquid Pre-IPO（上市前）</option>
               <option value="bybit-cfd">Bybit CFD（紧点差账户）</option>
               <option value="exness">Exness（参考深度近似）</option>
             </select>
@@ -70,6 +71,7 @@
             <datalist id="symbols"></datalist>
             <div class="symbol-quick-pick" id="symbolQuickPick" hidden></div>
             <div class="field-note" id="productNote">正在读取可交易合约…</div>
+            <div class="field-note" id="hlCatalogNote" hidden></div>
           </div>
 
           <section id="exnessInputs" hidden aria-label="Exness参考费用">
@@ -375,9 +377,10 @@
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=24"></script>
-    <script src="./exness-core.js?v=24"></script>
-    <script src="./exness-ui.js?v=24"></script>
-    <script src="./cost.js?v=24"></script>
+    <script src="./cost-core.js?v=25"></script>
+    <script src="./exness-core.js?v=25"></script>
+    <script src="./exness-ui.js?v=25"></script>
+    <script src="./hl-catalog.js?v=25"></script>
+    <script src="./cost.js?v=25"></script>
   </body>
 </html>

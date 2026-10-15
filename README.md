@@ -49,7 +49,7 @@
 | 平台 | 行情来源 | 费率模型 | 深度处理 |
 |---|---|---|---|
 | 币安 U 本位 | Futures 公共接口 | 普通用户费率、BNB开关、手动覆盖 | 1000档原始盘口；超深度或市价保护边界即阻断 |
-| Hyperliquid 主市场 / XYZ | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
+| Hyperliquid 主市场 / XYZ / Pre-IPO | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
 | Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手；原油3U/手，均仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ / USOUSD 的LP指示性深度 |
 | Exness | 币安/Bybit实时参考深度 | Exness基础费用＋参考盘口额外冲击，日常填写止损距离＋风险预算 | 用户指定的跨平台近似，非Exness真实盘口 |
 
@@ -137,6 +137,16 @@ USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换�
 - **当前买＋卖**：同一静态快照里，按实际买侧和卖侧分别扫盘。
 - **较差侧×2**：把更薄的一侧复制到进出两腿，用于模拟止损时流动性变差；这是默认压力口径。
 
+## Hyperliquid Pre-IPO（上市前）
+
+在平台菜单选择 **Hyperliquid Pre-IPO（上市前）**，即可跨部署方选择上市前相关永续。列表来自官方 `perpConciseAnnotations` 的 `preipo` 标签，再用各部署方实时元数据排除下架、缺失与非 USDC 合约；该分类是部署方提供的标签，不代表持有公司股权。
+
+2026-10-15 核验时，可用列表是 `io:ANTH`、`io:OAI`（显示 OPENAI）、`xyz:OURA`。截图中的 `para:ANTH` 及 `vntl` 的上市前合约已经下架，页面会说明，不借用同名合约的盘口。后续新增、分类或状态变化在载入及后台刷新时同步。
+
+输入 `OPENAI`、`OPENAI-USDC` 或 `io:OPENAI` 都会解析为真实接口代码 `io:OAI`。同名标的来自多个部署方时必须选择完整代码。每个合约保留自己的数量精度、费率参数与原生盘口；有效费率按公开 Tier 0 推导，未知参数需手填。USDC 按 1 美元近似，不包含资金费、账户优惠或前端附加费用。
+
+若当前合约在刷新时下架，会清空旧估算并禁用复制；盘口合约不符、来源时间缺失或过期也不能提供有效结果。
+
 ## 限价进场为什么是“条件结论”？
 
 币安与 Hyperliquid 的限价模式只计算这个场景：**Post-only 挂单已经全额成交，随后市价止损**。进场机械滑点记为 0，但成交概率、机会成本与逆向选择不在模型内；未成交时仓位和交易成本都是 0。
@@ -171,12 +181,14 @@ python3 -m http.server 8765 --directory .
 ```bash
 node tests/cost-core.test.js
 node tests/exness-core.test.js
+node tests/hl-catalog.test.js
 ```
 
 ## 主要规则来源
 
 - [Binance USDⓈ-M Futures API](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Exchange-Information)
 - [Hyperliquid Info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)
+- [Hyperliquid 上市前分类接口](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals#retrieve-concise-perp-annotations)
 - [Hyperliquid 费率](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees)
 - [Bybit CFD 指示性流动性](https://www.bybit.com/en/help-center/article/CFD-Indicative-Liquidity)
 - [Bybit CFD 费用说明](https://www.bybit.com/en/help-center/article/Bybit-CFD-Fees-Explained)

@@ -2,6 +2,7 @@
   "use strict";
 
   const core = window.CostCore;
+  const hlCatalog = window.HyperliquidCatalog;
   const BINANCE_API = "https://fapi.binance.com";
   const HL_INFO = "https://api.hyperliquid.xyz/info";
   const BYBIT_WS = "wss://ws2.bybit.com/realtime_w";
@@ -137,6 +138,7 @@
     symbolQuickPick: byId("symbolQuickPick"),
     symbolCount: byId("symbolCount"),
     productNote: byId("productNote"),
+    hlCatalogNote: byId("hlCatalogNote"),
     executionNote: byId("executionNote"),
     limitControls: byId("limitControls"),
     methodBlock: byId("methodBlock"),
@@ -223,6 +225,7 @@
     markets: [],
     market: null,
     dexMeta: null,
+    catalogNote: "",
     metadataSource: "live",
     autoFee: null,
     feeManual: false,
@@ -375,7 +378,7 @@
   function loadPreferences() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      if (["binance", "hl-main", "hl-xyz", "bybit-cfd", "exness"].includes(saved.platform)) {
+      if (["binance", "hl-main", "hl-xyz", "hl-preipo", "bybit-cfd", "exness"].includes(saved.platform)) {
         state.platform = saved.platform;
         el.platform.value = saved.platform;
       }
@@ -715,10 +718,10 @@
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
-  async function loadHyperliquidMarkets(dex, signal) {
+  async function loadHyperliquidMarkets(dex, signal, sharedPerpDexs) {
     const isMain = dex === "";
     const requests = [hlInfo(isMain ? { type: "metaAndAssetCtxs" } : { type: "metaAndAssetCtxs", dex }, signal)];
-    if (!isMain) requests.push(hlInfo({ type: "perpDexs" }, signal));
+    if (!isMain) requests.push(sharedPerpDexs === undefined ? hlInfo({ type: "perpDexs" }, signal) : Promise.resolve(sharedPerpDexs));
     const [pair, perpDexs] = await Promise.all(requests);
     const [meta, contexts] = pair;
     if (!meta?.universe || meta.universe.length !== contexts?.length) {
@@ -743,7 +746,19 @@
         isMain,
       }))
       .sort((left, right) => left.id.localeCompare(right.id));
-    return { markets, dexMeta };
+    return { markets, dexMeta, dex, collateralToken: meta.collateralToken,
+      delistedIds: meta.universe.filter(asset => asset.isDelisted).map(asset => asset.name) };
+  }
+
+  async function loadHyperliquidPreipoMarkets(signal) {
+    const [annotations, perpDexs] = await Promise.all([
+      hlInfo({ type: "perpConciseAnnotations" }, signal),
+      hlInfo({ type: "perpDexs" }, signal),
+    ]);
+    const entries = hlCatalog.preipoEntries(annotations);
+    const dexes = [...new Set(entries.map(entry => entry.dex))];
+    const snapshots = await Promise.all(dexes.map(dex => loadHyperliquidMarkets(dex, signal, perpDexs)));
+    return hlCatalog.collectPreipo(entries, snapshots);
   }
 
   async function requestMarkets(platform, signal) {
@@ -754,6 +769,7 @@
     if (platform === "bybit-cfd") {
       return { markets: loadBybitMarkets(), dexMeta: null, metadataSource: "bundled-spec" };
     }
+    if (platform === "hl-preipo") return loadHyperliquidPreipoMarkets(signal);
     return loadHyperliquidMarkets(platform === "hl-main" ? "" : "xyz", signal);
   }
 
@@ -773,7 +789,8 @@
       fixedRoundTripCommissionPerQuantity: market.fixedRoundTripCommissionPerQuantity,
       contractType: market.sourceMeta?.contractType,
       underlyingType: market.sourceMeta?.underlyingType,
-      deployerFeeScale: market.sourceMeta?.deployerFeeScale ?? dexMeta?.deployerFeeScale,
+      deployerFeeScale: Object.prototype.hasOwnProperty.call(market.sourceMeta || {}, "deployerFeeScale")
+        ? market.sourceMeta.deployerFeeScale : (market.feeDexMeta ?? dexMeta)?.deployerFeeScale,
       growthMode: market.sourceMeta?.growthMode,
     });
   }
@@ -786,9 +803,10 @@
     return 500_000;
   }
 
-  function marketCachePayload(markets, dexMeta) {
+  function marketCachePayload(markets, dexMeta, catalogNote = "") {
     return {
       dexMeta,
+      catalogNote,
       markets: markets.map((market) => ({
         ...market,
         maxQuantity: Number.isFinite(market.maxQuantity) ? market.maxQuantity : null,
@@ -799,6 +817,7 @@
   function restoreCachedMarkets(cached) {
     return {
       dexMeta: cached.payload.dexMeta || null,
+      catalogNote: cached.payload.catalogNote || "",
       markets: cached.payload.markets.map((market) => ({
         ...market,
         maxQuantity: market.maxQuantity == null ? Infinity : market.maxQuantity,
@@ -810,6 +829,7 @@
     if (state.platform === "exness") return "EXNESS · 手动情景";
     if (state.platform === "binance") return "BINANCE USDⓈ-M";
     if (state.platform === "hl-main") return "HYPERLIQUID MAIN";
+    if (state.platform === "hl-preipo") return "HYPERLIQUID PRE-IPO";
     if (state.platform === "bybit-cfd") return "BYBIT TRADFI CFD";
     return "HYPERLIQUID XYZ";
   }
@@ -836,6 +856,9 @@
     setMessage("正在读取可交易标的与数量规则…", "info");
     el.symbol.disabled = true;
     state.market = null;
+    state.markets = [];
+    state.catalogNote = "";
+    populateSymbols();
     state.lastBook = null;
     state.lastObservedBookId = null;
     state.lastChangeAt = null;
@@ -853,7 +876,7 @@
       state.metadataSource = loaded.metadataSource || "live";
       state.metadataFetchedAt = Date.now();
       if (state.metadataSource === "live") {
-        cacheMarkets(state.platform, marketCachePayload(loaded.markets, loaded.dexMeta));
+        cacheMarkets(state.platform, marketCachePayload(loaded.markets, loaded.dexMeta, loaded.catalogNote));
       }
     } catch (error) {
       if (error.name === "AbortError" || token !== state.loadToken) return;
@@ -874,11 +897,19 @@
 
     state.markets = loaded.markets;
     state.dexMeta = loaded.dexMeta;
+    state.catalogNote = loaded.catalogNote || "";
     el.symbol.disabled = false;
     populateSymbols();
     const preferred = el.symbol.value.trim() || defaultSymbol();
     const found = findMarket(preferred) || findMarket(defaultSymbol()) || state.markets[0];
     if (found) selectMarket(found, true, { preservedFees });
+    else {
+      el.symbol.value = "";
+      updateContext();
+      setLiveState("paused", "暂无可用合约");
+      setMessage("当前分类没有可估算的合约。可选择其他平台，或稍后刷新列表。", "warning");
+      return;
+    }
     if (state.platform === "exness") return;
     setLiveState(state.liveEnabled ? "loading" : "paused", state.liveEnabled ? "等待盘口" : "已暂停");
   }
@@ -916,29 +947,41 @@
           state.market?.id !== selectedId
         ) return;
         const refreshedMarket = loaded.markets.find((market) => market.id === selectedId);
+        const nextMetadataSource = loaded.metadataSource || "live";
+        const metadataSourceChanged = nextMetadataSource !== state.metadataSource;
+        state.markets = loaded.markets;
+        state.dexMeta = loaded.dexMeta;
+        state.catalogNote = loaded.catalogNote || "";
+        state.metadataSource = nextMetadataSource;
+        state.metadataFetchedAt = Date.now();
+        cacheMarkets(platform, marketCachePayload(loaded.markets, loaded.dexMeta, loaded.catalogNote));
+        populateSymbols();
         if (!refreshedMarket) {
+          cancelBookRequest();
+          window.clearTimeout(state.timer);
+          state.market = null;
+          state.lastBook = null;
+          state.lastBookMarketId = null;
+          state.autoFee = null;
+          resetSamples();
+          renderEmpty();
+          updateContext();
+          el.symbol.value = "";
+          setLiveState("error", "合约已不可用");
           setMessage(`合约${selectedId || ""}已不在最新交易列表，请重新选择。`, "error");
           return;
         }
         const nextRuleSignature = marketRuleSignature(refreshedMarket, loaded.dexMeta);
-        const nextMetadataSource = loaded.metadataSource || "live";
         const rulesChanged = nextRuleSignature !== previousRuleSignature;
-        const metadataSourceChanged = nextMetadataSource !== state.metadataSource;
+        if (rulesChanged || metadataSourceChanged) cancelBookRequest();
         const currentManualFees = {
           taker: state.feeManual ? el.takerFee.value : null,
           maker: state.makerFeeManual ? el.makerFee.value : null,
           fixedCommission: state.fixedCommissionManual ? el.fixedCommission.value : null,
         };
-        state.markets = loaded.markets;
-        state.dexMeta = loaded.dexMeta;
         state.market = refreshedMarket;
-        state.metadataSource = nextMetadataSource;
-        state.metadataFetchedAt = Date.now();
-        if (state.metadataSource === "live") {
-          cacheMarkets(platform, marketCachePayload(loaded.markets, loaded.dexMeta));
-        }
-        populateSymbols();
         el.symbol.value = refreshedMarket.id;
+        el.symbolQuickPick.querySelectorAll("button").forEach(button => button.classList.toggle("active", button.dataset.marketId === refreshedMarket.id));
         if (rulesChanged || metadataSourceChanged) {
           applyAutoFee();
           restoreManualFees(currentManualFees);
@@ -972,11 +1015,14 @@
     if (state.platform === "exness") return "BTCUSD";
     if (state.platform === "binance") return "BEATUSDT";
     if (state.platform === "hl-main") return "BTC";
+    if (state.platform === "hl-preipo") return "io:OAI";
     if (state.platform === "bybit-cfd") return "XAUUSD+";
     return "xyz:MU";
   }
 
   function populateSymbols() {
+    el.hlCatalogNote.hidden = state.platform !== "hl-preipo";
+    el.hlCatalogNote.textContent = state.catalogNote;
     el.symbols.replaceChildren();
     const fragment = document.createDocumentFragment();
     state.markets.forEach((market) => {
@@ -988,7 +1034,7 @@
     el.symbols.appendChild(fragment);
     el.symbolCount.textContent = `${state.markets.length}个`;
     el.symbolQuickPick.replaceChildren();
-    const showQuickPick = ["bybit-cfd", "exness"].includes(state.platform);
+    const showQuickPick = ["bybit-cfd", "exness", "hl-preipo"].includes(state.platform);
     el.symbolQuickPick.hidden = !showQuickPick;
     if (showQuickPick) {
       state.markets.forEach((market) => {
@@ -1003,6 +1049,10 @@
   }
 
   function findMarket(input) {
+    if (state.platform === "hl-preipo") {
+      const matches = hlCatalog.matchingMarkets(state.markets, input);
+      return matches.length === 1 ? matches[0] : null;
+    }
     const raw = String(input || "").trim().toUpperCase();
     if (!raw) return null;
     const candidates = [raw];
@@ -1021,6 +1071,13 @@
     if (state.platform === "bybit-cfd" && raw === "EURUSD") candidates.push("EURUSD+");
     if (state.platform === "bybit-cfd" && raw === "GBPUSD") candidates.push("GBPUSD+");
     return state.markets.find((market) => candidates.includes(market.id.toUpperCase())) || null;
+  }
+
+  function marketInputError(input) {
+    const matches = state.platform === "hl-preipo" ? hlCatalog.matchingMarkets(state.markets, input) : [];
+    return matches.length > 1
+      ? `同名合约来自不同部署方，请选择完整代码：${matches.map(market => market.id).join("、")}。`
+      : "没有找到可用合约。请输入完整代码，或从候选列表选择。";
   }
 
   function selectMarket(market, initial = false, { preservedFees = null } = {}) {
@@ -1050,6 +1107,7 @@
       state.limitPriceManual = false;
     }
     resetSamples();
+    renderEmpty();
     state.feeManual = false;
     state.makerFeeManual = false;
     state.fixedCommissionManual = false;
@@ -1101,8 +1159,8 @@
     } else {
       fee = core.inferHyperliquidFees(
         state.market.sourceMeta,
-        state.dexMeta,
-        state.platform === "hl-main",
+        state.market.feeDexMeta ?? state.dexMeta,
+        state.market.isMain,
       );
     }
     if (state.metadataSource.startsWith("stale-cache")) {
@@ -1146,7 +1204,8 @@
     const fee = percent == null ? null : percent / 100;
     if (!Number.isFinite(fee)) return null;
     const bp = fee * 10_000;
-    const source = isManual ? "手动覆盖" : `${state.autoFee?.source || "默认估算"} · ${FEE_CHECKED_AT}`;
+    const checkedAt = state.platform.startsWith("hl-") ? "2026-10-15" : FEE_CHECKED_AT;
+    const source = isManual ? "手动覆盖" : `${state.autoFee?.source || "默认估算"} · ${checkedAt}`;
     return `${label}${format(percent, 6)}% = ${format(bp, 4)}bp = 万${format(bp, 4)} · ${source}`;
   }
 
@@ -1186,7 +1245,10 @@
     if (state.platform === "exness") { exnessView.render(); return; }
     el.contextPlatform.textContent = platformLabel();
     el.contextSymbol.textContent = state.market?.id || "选择标的";
-    if (!state.market) return;
+    if (!state.market) {
+      el.productNote.textContent = "请选择可用标的";
+      return;
+    }
     const fee = state.autoFee;
     const growthSuffix = fee?.growth ? " · Growth Mode已开启" : "";
     const metadataSuffix = state.metadataSource === "live"
@@ -1197,7 +1259,8 @@
     const depthSuffix = state.platform === "bybit-cfd"
       ? " · LP指示性深度 · 需账户已切换紧点差模式"
       : "";
-    el.productNote.textContent = `${fee?.product || "产品待识别"}${growthSuffix}${depthSuffix}${metadataSuffix}`;
+    const categoryPrefix = state.market.isPreipo ? "上市前相关永续 · " : "";
+    el.productNote.textContent = `${categoryPrefix}${fee?.product || "产品待识别"}${growthSuffix}${depthSuffix}${metadataSuffix}`;
     el.productNote.classList.toggle(
       "warning-note",
       !["live", "bundled-spec"].includes(state.metadataSource) || !Number.isFinite(fee?.takerRate),
@@ -1214,7 +1277,7 @@
     const redline = numberValue(el.redline);
     if (!(stopPercent > 0)) throw new Error("止损距离必须大于0");
     if (!(risk > 0)) throw new Error("风险必须大于0");
-    if (!(feePercent >= 0)) throw new Error("单边吃单费率无效");
+    if (!Number.isFinite(feePercent) || feePercent < 0) throw new Error("单边吃单费率无效，请输入已知费率");
     if (state.execution === "limit" && !Number.isFinite(makerPercent)) {
       throw new Error("单边挂单费率无效；返佣可填负数");
     }
@@ -1223,7 +1286,7 @@
     }
     if (!(redline > 0)) throw new Error("成本红线必须大于0");
     if (redline > 10) throw new Error("成本红线不得高于10%R");
-    if (usesFixedCommission() && !(fixedCommission >= 0)) {
+    if (usesFixedCommission() && (!Number.isFinite(fixedCommission) || fixedCommission < 0)) {
       throw new Error("每手完整往返固定佣金无效");
     }
     return {
@@ -1309,13 +1372,17 @@
     };
   }
 
-  function normalizeHyperliquidBook(raw, profile = HL_DEPTH_PROFILES[0]) {
+  function normalizeHyperliquidBook(raw, profile, expectedCoin) {
+    if (raw?.coin !== expectedCoin) throw new Error("Hyperliquid盘口合约不匹配");
+    if (!Number.isFinite(raw.time) || raw.time <= 0 || Date.now() - raw.time > currentStaleThreshold() || raw.time > Date.now() + 5000) {
+      throw new Error("Hyperliquid盘口来源时间缺失或过期");
+    }
     if (!Array.isArray(raw.levels?.[0]) || !Array.isArray(raw.levels?.[1])) {
       throw new Error("Hyperliquid盘口结构异常");
     }
     return {
       id: `hl:${profile.id}:${core.bookSignature(raw.levels[0], raw.levels[1])}`,
-      time: Number(raw.time) || Date.now(),
+      time: raw.time,
       bids: raw.levels[0],
       asks: raw.levels[1],
       depthProfile: profile,
@@ -1335,7 +1402,7 @@
     const body = { type: "l2Book", coin: state.market.bookSymbol };
     if (profile.params) Object.assign(body, profile.params);
     const raw = await hlInfo(body, signal);
-    return normalizeHyperliquidBook(raw, profile);
+    return normalizeHyperliquidBook(raw, profile, body.coin);
   }
 
   function needsDepthFallback(result) {
@@ -2014,8 +2081,9 @@
   el.symbol.addEventListener("change", () => {
     const market = findMarket(el.symbol.value);
     if (!market) {
+      const message = marketInputError(el.symbol.value);
       el.symbol.value = state.market?.id || "";
-      setMessage("没有找到该合约。请输入完整代码，或从候选列表选择。", "error");
+      setMessage(message, "error");
       return;
     }
     selectMarket(market);
@@ -2028,8 +2096,9 @@
     const market = findMarket(el.symbol.value);
     if (market) selectMarket(market);
     else {
+      const message = marketInputError(el.symbol.value);
       el.symbol.value = state.market?.id || "";
-      setMessage("没有找到该合约。请输入完整代码，或从候选列表选择。", "error");
+      setMessage(message, "error");
     }
   });
 
