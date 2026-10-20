@@ -49,6 +49,7 @@
 | 平台 | 行情来源 | 费率模型 | 深度处理 |
 |---|---|---|---|
 | 币安 U 本位 | Futures 公共接口 | 普通用户费率、BNB开关、手动覆盖 | 1000档原始盘口；超深度或市价保护边界即阻断 |
+| OKX 精选股票 / ETF 永续 | V5公共400档盘口与当前限价边界 | 普通用户参考挂单0.02%、吃单0.05%，可手动覆盖 | 按张数、每张面值、数量步进及市价/止损上限计算 |
 | Hyperliquid 主市场 / XYZ / Pre-IPO | Info 公共接口 | 主市场与 HIP-3 链上参数推导、手动覆盖 | 原始20档不足时自动换用单一官方聚合盘口，不重复叠加 |
 | Bybit TradFi CFD 紧点差账户 | 官网 TradFi WebSocket | 金属、外汇完整交易 6U/手；原油3U/手，均仅收一次 | XAUUSD+ / XAGUSD / EURUSD+ / GBPUSD+ / USOUSD 的LP指示性深度 |
 | Exness | 币安/Bybit实时参考深度 | Exness基础费用＋参考盘口额外冲击，日常填写止损距离＋风险预算 | 用户指定的跨平台近似，非Exness真实盘口 |
@@ -137,6 +138,16 @@ USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换�
 - **当前买＋卖**：同一静态快照里，按实际买侧和卖侧分别扫盘。
 - **较差侧×2**：把更薄的一侧复制到进出两腿，用于模拟止损时流动性变差；这是默认压力口径。
 
+## OKX 精选股票 / ETF 永续
+
+平台菜单新增 **OKX 精选股票 / ETF 永续**，按用户最终指定只接入 **SOXL、SNDK、MU、SKHYNIX、SPCX**，明确排除 KORU。SOXL 是美国上市ETF，SKHYNIX 是韩国股票，其余为已核对的美股代码；产品均为价格永续，不是证券持仓。允许名单仅这五个，再与 OKX 实时 `instCategory=3`、USDT线性永续、`state=live` 交集；停牌、下架或规格未知时剔除，不自动扩大到其他股票。
+
+- 公共 `/api/v5/public/instruments?instType=SWAP` 提供状态、合约面值及数量规则；`/api/v5/market/books?instId=...&sz=400` 提供原始多档盘口。报价来源时间必须有效，`/api/v5/public/price-limit` 的当前限价边界也必须有效。暂停超过15秒后禁复制；接口失败、限价越界、数量超限或深度不足不假设全部成交。
+- **盘口数量和下单数量都按“张”**，不按股误读。名义价值＝张数×每张面值×价格；数量先按 `lotSz` 向下取整，再算实际风险、费用和冲击。显示张数及等效标的数量，并提供纯数字“复制当前张数”（按最新盘口和当前输入同步重算，并切到当前结果）。当前支持已核实 `ctMult=1` 的线性合约，其余规格不猜测。
+- 市价进出受 `maxMktSz/maxStopSz` 中较小值约束；限价入场还需满足 `maxLmtSz/maxLmtAmt`。当前保护价用于检查当前市价扫单及限价入场，**不代表未来止损时的保护价或成交保证**。
+- 公开股票FAQ的普通用户参考为单边挂单0.02%、吃单0.05%（2026-10-20核验）。这是公开参考，不是账户实收费率；可手动填写实际优惠，未知费率组需手填。未接账户接口，不假设零费活动或VIP资格。
+- 产品是追踪股票/ETF价格的永续合约，并非持有证券；USDT按1美元近似。保留现有风险预算、止损距离、市价/限价模型与5%/10%颜色边界，未计资金费与未来跳空。
+
 ## Hyperliquid Pre-IPO（上市前）
 
 在平台菜单选择 **Hyperliquid Pre-IPO（上市前）**，即可跨部署方选择上市前相关永续。列表来自官方 `perpConciseAnnotations` 的 `preipo` 标签，再用各部署方实时元数据排除下架、缺失与非 USDC 合约；该分类是部署方提供的标签，不代表持有公司股权。
@@ -182,9 +193,14 @@ python3 -m http.server 8765 --directory .
 node tests/cost-core.test.js
 node tests/exness-core.test.js
 node tests/hl-catalog.test.js
+node tests/okx-market.test.js
 ```
 
 ## 主要规则来源
+
+- [OKX股票永续FAQ与普通用户费用示例](https://www.okx.com/zh-hans/help/stock-perpetuals-faq)
+- [OKX公共API：合约、盘口与限价](https://www.okx.com/docs-v5/en/)
+- [Nasdaq上市目录](https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt)、[其他美国交易所上市目录](https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt)
 
 - [Binance USDⓈ-M Futures API](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Exchange-Information)
 - [Hyperliquid Info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)

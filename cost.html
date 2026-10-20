@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="成本估算" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://fapi.binance.com https://api.hyperliquid.xyz wss://ws2.bybit.com; manifest-src 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://www.okx.com https://fapi.binance.com https://api.hyperliquid.xyz wss://ws2.bybit.com; manifest-src 'self'"
     />
     <link rel="icon" href="./favicon-v5.ico" />
     <link rel="icon" href="./favicon-32-v5.png" type="image/png" sizes="32x32" />
@@ -18,7 +18,7 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon-v5.png" sizes="180x180" />
     <link rel="mask-icon" href="./safari-pinned-tab-v5.svg" color="#c8a96a" />
     <link rel="manifest" href="./manifest.webmanifest?v=5" />
-    <link rel="stylesheet" href="./cost.css?v=25" />
+    <link rel="stylesheet" href="./cost.css?v=26" />
     <title>实时执行成本估算器</title>
   </head>
   <body>
@@ -48,6 +48,7 @@
             <label for="platform">平台</label>
             <select id="platform">
               <option value="binance">币安 U本位</option>
+              <option value="okx-stocks">OKX 精选股票 / ETF 永续</option>
               <option value="hl-main">Hyperliquid 主市场</option>
               <option value="hl-xyz">Hyperliquid XYZ</option>
               <option value="hl-preipo">Hyperliquid Pre-IPO（上市前）</option>
@@ -72,6 +73,7 @@
             <div class="symbol-quick-pick" id="symbolQuickPick" hidden></div>
             <div class="field-note" id="productNote">正在读取可交易合约…</div>
             <div class="field-note" id="hlCatalogNote" hidden></div>
+            <div class="field-note" id="okxNote" hidden></div>
           </div>
 
           <section id="exnessInputs" hidden aria-label="Exness参考费用">
@@ -270,6 +272,7 @@
               <span>实际名义仓位</span>
               <strong id="positionValue">-- U</strong>
               <small id="quantityValue">数量 --</small>
+              <button type="button" class="text-button" id="copyContracts" title="按当前输入和最新盘口重算，并切到当前结果" hidden disabled>复制当前张数</button>
             </div>
             <div>
               <span>摩擦成本</span>
@@ -372,15 +375,17 @@
       </div>
 
       <footer class="footer">
-        <span>币安公开Futures API · Hyperliquid公开Info API · Bybit官网TradFi WebSocket · Exness参考费率</span>
-        <span>公开盘口费率核验：2026-08-10 · Exness规格：2026-09-23 · 原油规格：2026-09-24 · 实际账户费率可手动覆盖</span>
+        <span>币安公开Futures API · Hyperliquid公开Info API · OKX公开API · Bybit官网TradFi WebSocket · Exness参考费率</span>
+        <span>公开盘口费率核验：2026-08-10 · Exness规格：2026-09-23 · 原油规格：2026-09-24 · OKX精选合约：2026-10-20 · 实际账户费率可手动覆盖</span>
       </footer>
     </main>
 
-    <script src="./cost-core.js?v=25"></script>
-    <script src="./exness-core.js?v=25"></script>
-    <script src="./exness-ui.js?v=25"></script>
-    <script src="./hl-catalog.js?v=25"></script>
-    <script src="./cost.js?v=25"></script>
+    <script src="./cost-core.js?v=26"></script>
+    <script src="./exness-core.js?v=26"></script>
+    <script src="./exness-ui.js?v=26"></script>
+    <script src="./hl-catalog.js?v=26"></script>
+    <script src="./okx-selected-listings.js?v=26"></script>
+    <script src="./okx-market.js?v=26"></script>
+    <script src="./cost.js?v=26"></script>
   </body>
 </html>
