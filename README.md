@@ -138,6 +138,16 @@ USDJPY+虽已获得Bybit指示性深度，但其盈亏需做日元兑美元换�
 - **当前买＋卖**：同一静态快照里，按实际买侧和卖侧分别扫盘。
 - **较差侧×2**：把更薄的一侧复制到进出两腿，用于模拟止损时流动性变差；这是默认压力口径。
 
+## Bybit 精选股票 / ETF 永续
+
+平台菜单选择 **Bybit 精选股票 / ETF 永续**，只提供 **SOXL、SNDK、MU、SKHYNIX、SPCX** 五个指定标的，不包含KORU。与既有Bybit CFD菜单独立；股票永续使用V5原始订单簿，不套用CFD每手佣金或LP累计深度。
+
+- 逐个查询 `/v5/market/instruments-info?category=linear&symbol=...`，核对USDT线性永续、交易状态与股票/ETF分类。下架、规格无效时剔除；未知或错配响应不能混入其他标的。
+- 实时使用 `/v5/market/orderbook?category=linear&symbol=...&limit=500`，盘口数量为标的数量，乘数为1；数量按实时 `qtyStep` 向下取整，核对最小数量、最小金额、市价数量上限。限价进场还需满足限价数量上限，并保留市价止损上限。
+- 读取 `/v5/market/price-limit` 检查当前买卖保护价。盘口、撮合时间（返回时）及保护价均需在15秒内；代码错配、空盘、倒挂、保护价越界、深度不足不提供可复制的有效结果。未来止损仍是当前盘口平移情景，不承诺未来保护边界或成交。
+- 2026-10-20官方普通用户TradFi活动参考：单边挂单0%、吃单0.0275%，未含MNT抵扣、VIP、账户专属优惠；活动及规则可变，显示核验日期且允许手动覆盖。不是普通加密永续的0.02%/0.055%，不接入私有账户费率接口。
+- 显示实际下单数量及单位，并提供 **复制当前数量**；点击时用最新有效盘口和当前输入重新计算，不复制历史窗口中的旧仓位。杠杆显示官方规格上限参考，不代表所有仓位都可用该倍数。保持原有风险预算、止损距离、限价/市价计算及5%～10%橙色、10%以上红色规则。
+
 ## OKX 精选股票 / ETF 永续
 
 平台菜单新增 **OKX 精选股票 / ETF 永续**，按用户最终指定只接入 **SOXL、SNDK、MU、SKHYNIX、SPCX**，明确排除 KORU。SOXL 是美国上市ETF，SKHYNIX 是韩国股票，其余为已核对的美股代码；产品均为价格永续，不是证券持仓。允许名单仅这五个，再与 OKX 实时 `instCategory=3`、USDT线性永续、`state=live` 交集；停牌、下架或规格未知时剔除，不自动扩大到其他股票。
@@ -194,9 +204,15 @@ node tests/cost-core.test.js
 node tests/exness-core.test.js
 node tests/hl-catalog.test.js
 node tests/okx-market.test.js
+node tests/bybit-stocks.test.js
 ```
 
 ## 主要规则来源
+
+- [Bybit普通用户TradFi永续费率](https://www.bybit.com/en/fee/futures)
+- [Bybit V5合约规格](https://bybit-exchange.github.io/docs/v5/market/instrument)
+- [Bybit V5订单簿](https://bybit-exchange.github.io/docs/v5/market/orderbook)
+- [Bybit V5价格保护](https://bybit-exchange.github.io/docs/v5/market/order-price-limit)
 
 - [OKX股票永续FAQ与普通用户费用示例](https://www.okx.com/zh-hans/help/stock-perpetuals-faq)
 - [OKX公共API：合约、盘口与限价](https://www.okx.com/docs-v5/en/)

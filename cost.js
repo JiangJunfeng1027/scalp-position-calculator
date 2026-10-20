@@ -4,6 +4,8 @@
   const core = window.CostCore;
   const hlCatalog = window.HyperliquidCatalog;
   const okx = window.OKXMarket;
+  const bybitStocks = window.BybitStocks;
+  const BYBIT_STOCKS_API = "https://api.bybit.com";
   const OKX_API = "https://www.okx.com";
   const BINANCE_API = "https://fapi.binance.com";
   const HL_INFO = "https://api.hyperliquid.xyz/info";
@@ -275,6 +277,10 @@
   const exnessView = window.createExnessView({ el, state, format, numberValue, renderEmpty, setLiveState, setMessage,
     sources: EXNESS_PROXY_SOURCES, loadBook: fetchExnessProxyBook, closeSource: closeBybitSocket });
 
+  function usesStockQuantity() {
+    return ["okx-stocks", "bybit-stocks"].includes(state.platform);
+  }
+
   function usesFixedCommission(platform = state.platform) {
     return platform === "bybit-cfd";
   }
@@ -382,7 +388,7 @@
   function loadPreferences() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      if (["binance", "okx-stocks", "hl-main", "hl-xyz", "hl-preipo", "bybit-cfd", "exness"].includes(saved.platform)) {
+      if (["binance", "okx-stocks", "bybit-stocks", "hl-main", "hl-xyz", "hl-preipo", "bybit-cfd", "exness"].includes(saved.platform)) {
         state.platform = saved.platform;
         el.platform.value = saved.platform;
       }
@@ -766,6 +772,11 @@
   }
 
   async function requestMarkets(platform, signal) {
+    if (platform === "bybit-stocks") {
+      const responses = await Promise.all(bybitStocks.tickers.map(ticker =>
+        fetchJson(`${BYBIT_STOCKS_API}/v5/market/instruments-info?category=linear&symbol=${ticker}USDT`, { signal })));
+      return bybitStocks.normalizeMarkets(responses);
+    }
     if (platform === "okx-stocks") {
       const raw = await fetchJson(`${OKX_API}/api/v5/public/instruments?instType=SWAP`, { signal });
       return okx.normalizeMarkets(raw, window.OKXSelectedListings);
@@ -792,6 +803,8 @@
       maxLimitQuantity: market.maxLimitQuantity,
       maxLimitNotional: market.maxLimitNotional,
       groupId: market.sourceMeta?.groupId,
+      symbolType: market.sourceMeta?.symbolType,
+      isPreListing: market.sourceMeta?.isPreListing,
       priceTick: market.priceTick,
       marketTakeBound: market.marketTakeBound,
       contractMultiplier: market.contractMultiplier,
@@ -846,6 +859,7 @@
     if (state.platform === "exness") return "EXNESS · 手动情景";
     if (state.platform === "binance") return "BINANCE USDⓈ-M";
     if (state.platform === "okx-stocks") return "OKX 精选股票 / ETF 永续";
+    if (state.platform === "bybit-stocks") return "BYBIT 精选股票 / ETF 永续";
     if (state.platform === "hl-main") return "HYPERLIQUID MAIN";
     if (state.platform === "hl-preipo") return "HYPERLIQUID PRE-IPO";
     if (state.platform === "bybit-cfd") return "BYBIT TRADFI CFD";
@@ -1033,6 +1047,7 @@
     if (state.platform === "exness") return "BTCUSD";
     if (state.platform === "binance") return "BEATUSDT";
     if (state.platform === "okx-stocks") return "SOXL-USDT-SWAP";
+    if (state.platform === "bybit-stocks") return "SOXLUSDT";
     if (state.platform === "hl-main") return "BTC";
     if (state.platform === "hl-preipo") return "io:OAI";
     if (state.platform === "bybit-cfd") return "XAUUSD+";
@@ -1042,8 +1057,8 @@
   function populateSymbols() {
     el.hlCatalogNote.hidden = state.platform !== "hl-preipo";
     el.hlCatalogNote.textContent = state.catalogNote;
-    el.okxNote.hidden = state.platform !== "okx-stocks";
-    el.okxNote.textContent = state.platform === "okx-stocks" ? state.catalogNote : "";
+    el.okxNote.hidden = !usesStockQuantity();
+    el.okxNote.textContent = usesStockQuantity() ? state.catalogNote : "";
     el.symbols.replaceChildren();
     const fragment = document.createDocumentFragment();
     state.markets.forEach((market) => {
@@ -1055,10 +1070,10 @@
     el.symbols.appendChild(fragment);
     el.symbolCount.textContent = `${state.markets.length}个`;
     el.symbolQuickPick.replaceChildren();
-    const showQuickPick = ["bybit-cfd", "exness", "hl-preipo", "okx-stocks"].includes(state.platform);
+    const showQuickPick = ["bybit-cfd", "exness", "hl-preipo", "okx-stocks", "bybit-stocks"].includes(state.platform);
     el.symbolQuickPick.hidden = !showQuickPick;
     if (showQuickPick) {
-      const quickMarkets = state.platform === "okx-stocks"
+      const quickMarkets = usesStockQuantity()
         ? ["SOXL", "SNDK", "MU", "SKHYNIX", "SPCX"].map(ticker => state.markets.find(m => m.ticker === ticker)).filter(Boolean)
         : state.markets;
       quickMarkets.forEach((market) => {
@@ -1080,7 +1095,7 @@
     const raw = String(input || "").trim().toUpperCase();
     if (!raw) return null;
     const candidates = [raw];
-    if (state.platform === "okx-stocks") {
+    if (usesStockQuantity()) {
       const ticker = raw.replace(/\.P$/, "").replace(/(?:[-/]?USDT)?(?:-SWAP)?$/, "").replace(/^\$/, "").replace(".", "");
       return state.markets.find(market => market.id.toUpperCase() === raw || market.ticker === ticker) || null;
     }
@@ -1177,6 +1192,8 @@
       fee = core.inferBinanceFees(state.market.sourceMeta, el.bnbDiscount.checked);
     } else if (state.platform === "okx-stocks") {
       fee = okx.fees(state.market);
+    } else if (state.platform === "bybit-stocks") {
+      fee = bybitStocks.fees(state.market);
     } else if (state.platform === "bybit-cfd") {
       fee = {
         rate: 0,
@@ -1234,7 +1251,7 @@
     const fee = percent == null ? null : percent / 100;
     if (!Number.isFinite(fee)) return null;
     const bp = fee * 10_000;
-    const checkedAt = state.platform === "okx-stocks" ? "2026-10-20" : state.platform.startsWith("hl-") ? "2026-10-15" : FEE_CHECKED_AT;
+    const checkedAt = usesStockQuantity() ? "2026-10-20" : state.platform.startsWith("hl-") ? "2026-10-15" : FEE_CHECKED_AT;
     const source = isManual ? "手动覆盖" : `${state.autoFee?.source || "默认估算"} · ${checkedAt}`;
     return `${label}${format(percent, 6)}% = ${format(bp, 4)}bp = 万${format(bp, 4)} · ${source}`;
   }
@@ -1292,7 +1309,9 @@
     const categoryPrefix = state.market.isPreipo ? "上市前相关永续 · " : "";
     const contractSuffix = state.platform === "okx-stocks"
       ? ` · ${state.market.ticker}${state.market.isEtf ? " ETF" : ""} · 1张＝${format(state.market.contractMultiplier, 8)}${state.market.isEtf ? "份" : "股"}对应数量`
-      : "";
+      : state.platform === "bybit-stocks"
+        ? ` · 下单数量按${state.market.ticker}计 · 最大杠杆参考${format(state.market.leverage, 0)}倍（随风险档位变化）`
+        : "";
     el.productNote.textContent = `${categoryPrefix}${fee?.product || "产品待识别"}${contractSuffix}${growthSuffix}${depthSuffix}${metadataSuffix}`;
     el.productNote.classList.toggle(
       "warning-note",
@@ -1347,7 +1366,7 @@
       quantityStep: state.market.quantityStep,
       contractMultiplier: state.market.contractMultiplier || 1,
       minQuantity: state.market.minQuantity,
-      maxQuantity: state.platform === "okx-stocks" && state.execution === "limit"
+      maxQuantity: usesStockQuantity() && state.execution === "limit"
         ? Math.min(state.market.maxQuantity, state.market.maxLimitQuantity) : state.market.maxQuantity,
       maxNotional: state.platform === "okx-stocks" && state.execution === "limit"
         ? Math.min(state.market.maxNotional, state.market.maxLimitNotional) : state.market.maxNotional,
@@ -1382,6 +1401,7 @@
       ? core.estimateLimitEntryMarketStop(config)
       : core.estimate(config);
     if (state.platform === "okx-stocks") result = okx.checkPriceLimits(result, book, state.execution, state.side);
+    if (state.platform === "bybit-stocks") result = bybitStocks.checkPriceLimits(result, book, state.execution, state.side);
     if (result?.status === "ok") {
       result.riskDenominator = result.requestedRisk;
       result.depthProfileId = book.depthProfile?.id || `${state.platform}-raw`;
@@ -1426,6 +1446,16 @@
   }
 
   async function fetchBook(signal, profile = HL_DEPTH_PROFILES[0]) {
+    if (state.platform === "bybit-stocks") {
+      const market = state.market;
+      const symbol = encodeURIComponent(market.bookSymbol);
+      const [raw, limits] = await Promise.all([
+        fetchJson(`${BYBIT_STOCKS_API}/v5/market/orderbook?category=linear&symbol=${symbol}&limit=500`, { signal }),
+        fetchJson(`${BYBIT_STOCKS_API}/v5/market/price-limit?category=linear&symbol=${symbol}`, { signal }),
+      ]);
+      const book = bybitStocks.normalizeBook(raw, limits, market);
+      return { ...book, id: `bybit-stocks:${symbol}:${core.bookSignature(book.bids, book.asks)}` };
+    }
     if (state.platform === "okx-stocks") {
       const market = state.market;
       const symbol = encodeURIComponent(market.bookSymbol);
@@ -1456,7 +1486,7 @@
   }
 
   async function fetchEstimatedBook(signal, manual = false) {
-    if (["binance", "bybit-cfd", "okx-stocks"].includes(state.platform)) {
+    if (["binance", "bybit-cfd", "okx-stocks", "bybit-stocks"].includes(state.platform)) {
       const book = await fetchBook(signal);
       return { book, result: estimateBook(book) };
     }
@@ -1747,7 +1777,7 @@
         : null;
     el.quantityValue.textContent = state.platform === "bybit-cfd"
       ? `${format(result.quantity, 4)} 手 · ${baseMarginOnly ? "基础保证金参考" : "最低保证金"}≈${format(minimumMargin, 2)}U`
-      : state.platform === "okx-stocks" ? okxQuantityText(result) : `数量 ${format(result.quantity, 8)}`;
+      : usesStockQuantity() ? stockQuantityText(result) : `数量 ${format(result.quantity, 8)}`;
     el.costValue.textContent = `${format(cost, 2)} U`;
     el.costRateValue.textContent = `总成本率 ${formatBp(result[rateField()])}`;
     el.totalLossValue.textContent = `${format(totalLoss, 2)} U`;
@@ -1784,12 +1814,13 @@
     el.limitAssumption.hidden = state.execution !== "limit";
   }
 
-  function okxContractsText(result) {
+  function orderQuantityText(result) {
     return formatFloor(result.quantity, core.decimalPlaces(state.market.quantityStep)).replace(/,/g, "");
   }
 
-  function okxQuantityText(result) {
-    return `${okxContractsText(result)} 张 · 等效 ${format(result.quantity * state.market.contractMultiplier, 8)} ${state.market.ticker} ${state.market.isEtf ? "份" : "股"}`;
+  function stockQuantityText(result) {
+    if (state.platform === "bybit-stocks") return `${orderQuantityText(result)} ${state.market.ticker} · 下单数量`;
+    return `${orderQuantityText(result)} 张 · 等效 ${format(result.quantity * state.market.contractMultiplier, 8)} ${state.market.ticker} ${state.market.isEtf ? "份" : "股"}`;
   }
 
   function renderSparkline() {
@@ -1855,7 +1886,7 @@
     if (state.platform === "hl-xyz" || state.market?.contractType === "TRADIFI_PERPETUAL") {
       warnings.push("外盘休市时RWA内部定价与深度可能明显变化");
     }
-    if (state.platform === "okx-stocks") {
+    if (usesStockQuantity()) {
       warnings.push("股票/ETF价格永续，非证券持仓；USDT按1美元近似，未计资金费与账户优惠");
       if (state.execution === "limit") warnings.push("已核对当前进场限价；未来止损价格保护边界可能改变");
     }
@@ -1875,7 +1906,7 @@
       return;
     }
     el.copySummary.disabled = state.bookStale;
-    el.copyContracts.disabled = state.bookStale || state.platform !== "okx-stocks";
+    el.copyContracts.disabled = state.bookStale || !usesStockQuantity();
     renderHero(sample);
     renderMetrics(sample);
     renderMessage(sample);
@@ -1931,13 +1962,14 @@
       insufficient_stop_depth: "止损方向的公开盘口不足以承接此仓位；自动扩展后仍不够，禁止外推。",
       market_take_bound: `扫单末档超过币安市价保护边界±${format(result.marketTakeBound * 100, 3)}%，可能无法完整成交。`,
       okx_price_limit: "所需成交价超出OKX当前买卖限价边界，不能按全部成交估算。",
+      bybit_price_limit: "所需成交价超出Bybit当前买卖保护价边界，不能按全部成交估算。",
       would_take_liquidity: "该限价会立即吃单，不符合Post-only挂单假设；请把做多价放到卖一以下，或把做空价放到买一以上。",
       post_only_required: "限价模型只接受Post-only挂单成交条件。",
       invalid_limit_tick: `限价不符合该合约最小价格步进${format(result.priceTick, 8)}，请调整后再算。`,
       invalid_stop_price: "止损距离使计划止损价无效，请检查方向与止损百分比。",
     };
     const depthStatuses = ["insufficient_snapshot_depth", "insufficient_stop_depth"];
-    const boundaryStatuses = ["market_take_bound", "okx_price_limit"];
+    const boundaryStatuses = ["market_take_bound", "okx_price_limit", "bybit_price_limit"];
     const invalidKind = depthStatuses.includes(result.status)
       ? "可见深度不足"
       : boundaryStatuses.includes(result.status)
@@ -2025,7 +2057,8 @@
     el.limitAssumption.hidden = true;
     const isHyperliquid = state.platform.startsWith("hl-");
     el.depthModeBlock.hidden = !isHyperliquid;
-    el.copyContracts.hidden = state.platform !== "okx-stocks";
+    el.copyContracts.hidden = !usesStockQuantity();
+    el.copyContracts.textContent = state.platform === "bybit-stocks" ? "复制当前数量" : "复制当前张数";
     el.depthModeBlock.parentElement?.classList.toggle("single-column", !isHyperliquid);
     el.executionNote.textContent = isBybit
       ? "双腿按Tight-Spread CFD的完整交易固定佣金，并用LP指示性深度估算；休市或过期即阻断。"
@@ -2099,7 +2132,7 @@
     }
     const sample = selectedSample();
     if (!sample || !state.market) return;
-    if (state.bookStale || (state.platform === "okx-stocks" && Date.now() - (state.lastBook?.time || 0) > 15_000)) {
+    if (state.bookStale || (usesStockQuantity() && Date.now() - (state.lastBook?.time || 0) > 15_000)) {
       setMessage("盘口已过期，禁止复制为实时结果。请先刷新。", "error");
       return;
     }
@@ -2110,7 +2143,7 @@
       `${platformLabel()} ${state.market.id}`,
       `止损 ${format(result.stopPercent, 4)}%｜风险 ${format(result.requestedRisk, 2)}U`,
       `仓位 ${format(result.actualNotional, 2)}U｜成本 ${format(cost, 2)}U`,
-      ...(state.platform === "okx-stocks" ? [okxQuantityText(result), "普通用户参考费率可手动覆盖；股票/ETF价格永续，非证券持仓"] : []),
+      ...(usesStockQuantity() ? [stockQuantityText(result), "普通用户参考费率可手动覆盖；股票/ETF价格永续，非证券持仓"] : []),
       `${state.view === "worst" ? "滚动最差" : state.view === "median" ? "滚动中位" : "当前"}成本占风险 ${format(value, 2)}%`,
       `${usesFixedCommission() ? "完整交易佣金" : "手续费"} ${format(result.feeCost, 2)}U｜买滑 ${formatBp(result.buySlipBp)}｜卖滑 ${formatBp(result.sellSlipBp)}`,
       state.execution === "limit"
@@ -2316,7 +2349,7 @@
 
   el.copySummary.addEventListener("click", copySummary);
   el.copyContracts.addEventListener("click", async () => {
-    if (state.platform !== "okx-stocks" || !state.lastBook || state.lastBookMarketId !== state.market?.id || state.bookStale || Date.now() - state.lastBook.time > 15_000) return;
+    if (!usesStockQuantity() || !state.lastBook || state.lastBookMarketId !== state.market?.id || state.bookStale || Date.now() - state.lastBook.time > 15_000) return;
     try {
       // Flush current inputs synchronously: the input debounce and historical
       // worst-sample view must never determine the quantity placed on clipboard.
@@ -2329,14 +2362,14 @@
       updateActiveButtons();
       render();
       savePreferences();
-      const text = okxContractsText(result);
+      const text = orderQuantityText(result);
       if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
       else if (!copyFallback(text)) throw new Error("copy failed");
-      el.copyContracts.textContent = "已复制张数";
-      window.setTimeout(() => { el.copyContracts.textContent = "复制当前张数"; }, 1300);
+      el.copyContracts.textContent = "已复制数量";
+      window.setTimeout(() => { el.copyContracts.textContent = state.platform === "bybit-stocks" ? "复制当前数量" : "复制当前张数"; }, 1300);
     } catch (error) {
       renderEmpty();
-      setMessage(`复制张数失败：${error.message}`, "error");
+      setMessage(`复制数量失败：${error.message}`, "error");
     }
   });
   document.getElementById("exCopyLots").addEventListener("click", async () => {
@@ -2399,13 +2432,13 @@
     }
   }, METADATA_SOFT_TTL);
   state.okxFreshnessTimer = window.setInterval(() => {
-    if (state.platform !== "okx-stocks" || !state.lastBook || Date.now() - state.lastBook.time <= 15_000) return;
+    if (!usesStockQuantity() || !state.lastBook || Date.now() - state.lastBook.time <= 15_000) return;
     state.bookStale = true;
     el.resultsPanel.dataset.stale = "true";
     el.copySummary.disabled = true;
     el.copyContracts.disabled = true;
     setLiveState("paused", "盘口已过期");
-    setMessage("OKX盘口或价格保护数据已超过15秒，请刷新后再使用结果。", "warning");
+    setMessage(`${state.platform === "bybit-stocks" ? "Bybit" : "OKX"}盘口或价格保护数据已超过15秒，请刷新后再使用结果。`, "warning");
   }, 1000);
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
